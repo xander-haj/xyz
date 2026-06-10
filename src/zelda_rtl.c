@@ -207,6 +207,18 @@ static bool Zelda_ShouldAnchorBg3ToViewport() {
   return overworld_map_state == 0 && Zelda_IsGameplayModuleForBg3Anchor(main_module_index);
 }
 
+// Module 14 usually owns BG3 menu/text screens, whose 4:3 frames should not
+// be repeated into synthetic side padding. Potion refills and the first
+// map/flute fade frame still present live gameplay, so they may keep the
+// saved module's border-fill behavior.
+static bool Zelda_Module14UsesGameplayBorderFill() {
+  if (submodule_index == 7 || submodule_index == 10)
+    return overworld_map_state == 0 && Zelda_IsGameplayModuleForBg3Anchor(saved_module_for_menu);
+  if (submodule_index == 4 || submodule_index == 8 || submodule_index == 9)
+    return Zelda_IsGameplayModuleForBg3Anchor(saved_module_for_menu);
+  return false;
+}
+
 /*
  * kUpperBitmasks — 16 single-bit masks ordered from MSB (0x8000) down to LSB
  * (0x0001). Indexed by a bit position to produce a one-hot uint16 without
@@ -451,8 +463,11 @@ static void ConfigurePpuSideSpace() {
   else if (mod == 8 || mod == 10 || mod == 11)
     mod = 9;
   bool is_master_sword_grove = BYTE(overworld_screen_index) == 0x80 && dungeon_room_index == 0x180;
+  bool light_cone_active = mod == 7 && hdr_dungeon_dark_with_lantern && TS_copy != 0;
+  bool allow_border_fill = main_module_index != 14 || Zelda_Module14UsesGameplayBorderFill();
   PpuWidescreenBorderFillMode border_fill_mode = kPpuWidescreenBorderFill_None;
-  if (g_config.fill_extended_aspect_ratio_borders && g_config.extended_aspect_ratio != 0) {
+  if (allow_border_fill && !light_cone_active &&
+      g_config.fill_extended_aspect_ratio_borders && g_config.extended_aspect_ratio != 0) {
     if (mod == 9)
       border_fill_mode = is_master_sword_grove ?
           kPpuWidescreenBorderFill_GroveTileColumns : kPpuWidescreenBorderFill_TwoTileRepeat;
