@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.xander_haj.Z3R</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT AND BSD-3-Clause</project_license>
+  <name>Z3R</name>
+  <summary>Native action-adventure reimplementation and randomizer</summary>
+  <developer id="io.github.xander_haj">
+    <name>xander-haj</name>
+  </developer>
+  <description>
+    <p>
+      Z3R is an open-source native reimplementation and randomizer project. It
+      requires the user to provide their own legally dumped compatible game ROM
+      before gameplay assets can be generated.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.xander_haj.Z3R.desktop</launchable>
+  <url type="homepage">https://github.com/xander-haj/Z3R</url>
+  <url type="bugtracker">https://github.com/xander-haj/Z3R/issues</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-06-10" />
+  </releases>
+</component>

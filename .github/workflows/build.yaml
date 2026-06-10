@@ -20,8 +20,8 @@ jobs:
         - name: Mac
           os: macos-latest
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
       with:
         python-version: '3.10'
     - name: Install dependencies for Linux
@@ -35,3 +35,20 @@ jobs:
         brew install sdl2 coreutils
     - name: Build
       run: make -j$(nproc) zelda3
+
+  build-flatpak:
+    name: Flatpak for Linux
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build and upload Flatpak bundle
+      uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+      with:
+        bundle: Z3R-linux.flatpak
+        manifest-path: packaging/flatpak/io.github.xander_haj.Z3R.yml
+        branch: stable
+        cache-key: flatpak-builder-${{ github.sha }}

@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+
+config_base="${XDG_CONFIG_HOME:-$HOME/.config}"
+data_base="${XDG_DATA_HOME:-$HOME/.local/share}"
+config_dir="${config_base}/Z3R"
+data_dir="${data_base}/Z3R"
+
+mkdir -p "${config_dir}" "${data_dir}/saves"
+
+if [ ! -f "${config_dir}/zelda3.ini" ]; then
+  cp /app/share/Z3R/zelda3.ini "${config_dir}/zelda3.ini"
+fi
+
+if [ ! -e "${config_dir}/saves" ] && [ ! -L "${config_dir}/saves" ]; then
+  ln -s "${data_dir}/saves" "${config_dir}/saves"
+fi
+
+if [ ! -e "${config_dir}/zelda3_assets.dat" ] && [ ! -L "${config_dir}/zelda3_assets.dat" ]; then
+  ln -s "${data_dir}/zelda3_assets.dat" "${config_dir}/zelda3_assets.dat"
+fi
+
+if [ ! -f "${data_dir}/zelda3_assets.dat" ]; then
+  printf '%s\n' \
+    "Z3R could not find zelda3_assets.dat." \
+    "Generate zelda3_assets.dat from your own legally dumped compatible ROM," \
+    "then place it here:" \
+    "${data_dir}/zelda3_assets.dat" >&2
+  exit 1
+fi
+
+cd "${config_dir}"
+exec /app/bin/zelda3.real --config "${config_dir}/zelda3.ini" "$@"
