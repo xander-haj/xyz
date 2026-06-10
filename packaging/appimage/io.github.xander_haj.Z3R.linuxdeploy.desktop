@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Z3R
+Comment=Native action-adventure reimplementation and randomizer
+Exec=zelda3.real
+Icon=io.github.xander_haj.Z3R
+Categories=Game;AdventureGame;
+Terminal=false
+StartupNotify=false

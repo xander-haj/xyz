@@ -16,6 +16,8 @@ jobs:
   build-unix:
     name: on ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -62,12 +64,9 @@ jobs:
         install -Dm755 zelda3 AppDir/usr/bin/zelda3.real
         install -Dm755 z3r-missing-assets-dialog AppDir/usr/bin/z3r-missing-assets-dialog
         install -Dm644 zelda3.ini AppDir/usr/share/Z3R/zelda3.ini
-        install -Dm644 packaging/appimage/io.github.xander_haj.Z3R.desktop AppDir/usr/share/applications/io.github.xander_haj.Z3R.desktop
-        install -Dm644 packaging/appimage/io.github.xander_haj.Z3R.desktop AppDir/io.github.xander_haj.Z3R.desktop
+        install -Dm644 packaging/appimage/io.github.xander_haj.Z3R.linuxdeploy.desktop AppDir/io.github.xander_haj.Z3R.desktop
         install -Dm644 packaging/flatpak/io.github.xander_haj.Z3R.svg AppDir/usr/share/icons/hicolor/scalable/apps/io.github.xander_haj.Z3R.svg
         install -Dm644 packaging/flatpak/io.github.xander_haj.Z3R.svg AppDir/io.github.xander_haj.Z3R.svg
-        install -Dm755 packaging/appimage/AppRun AppDir/AppRun
-        ln -sf ../../AppRun AppDir/usr/bin/z3r
 
         wget -q "${LINUXDEPLOY_URL}" -O linuxdeploy-x86_64.AppImage
         chmod +x linuxdeploy-x86_64.AppImage
@@ -76,13 +75,13 @@ jobs:
         ./linuxdeploy-root/AppRun \
           --appdir AppDir \
           --executable AppDir/usr/bin/zelda3.real \
-          --executable AppDir/usr/bin/z3r \
           --executable AppDir/usr/bin/z3r-missing-assets-dialog \
           --desktop-file AppDir/io.github.xander_haj.Z3R.desktop \
           --icon-file AppDir/io.github.xander_haj.Z3R.svg
 
         install -Dm755 packaging/appimage/AppRun AppDir/AppRun
         ln -sf ../../AppRun AppDir/usr/bin/z3r
+        install -Dm644 packaging/appimage/io.github.xander_haj.Z3R.desktop AppDir/usr/share/applications/io.github.xander_haj.Z3R.desktop
         install -Dm644 packaging/appimage/io.github.xander_haj.Z3R.desktop AppDir/io.github.xander_haj.Z3R.desktop
         ln -sf usr/share/icons/hicolor/scalable/apps/io.github.xander_haj.Z3R.svg AppDir/io.github.xander_haj.Z3R.svg
 
@@ -109,15 +108,19 @@ jobs:
     - name: Upload ${{ matrix.name }} release asset
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v3
+      env:
+        GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
       with:
-        token: ${{ github.token }}
+        token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         files: dist/${{ matrix.archive }}
         generate_release_notes: true
     - name: Upload Linux AppImage release asset
       if: ${{ matrix.platform == 'linux' && startsWith(github.ref, 'refs/tags/') }}
       uses: softprops/action-gh-release@v3
+      env:
+        GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
       with:
-        token: ${{ github.token }}
+        token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         files: |
           dist/Z3R-linux-x64.AppImage
           dist/Z3R-linux-x64.AppImage.tar.gz
@@ -126,6 +129,8 @@ jobs:
   build-windows:
     name: on Windows
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
     - uses: actions/checkout@v6
     - name: Set up MSBuild
@@ -160,14 +165,18 @@ jobs:
     - name: Upload Windows release asset
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v3
+      env:
+        GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
       with:
-        token: ${{ github.token }}
+        token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         files: dist/Z3R-windows-x64.zip
         generate_release_notes: true
 
   build-flatpak:
     name: Flatpak for Linux
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
       options: --privileged
@@ -185,7 +194,9 @@ jobs:
     - name: Upload Flatpak release asset
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v3
+      env:
+        GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
       with:
-        token: ${{ github.token }}
+        token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         files: Z3R-linux.flatpak
         generate_release_notes: true
