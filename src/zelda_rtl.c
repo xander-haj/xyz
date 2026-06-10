@@ -208,9 +208,10 @@ static bool Zelda_ShouldAnchorBg3ToViewport() {
 }
 
 // Module 14 usually owns BG3 menu/text screens, whose 4:3 frames should not
-// be repeated into synthetic side padding. Potion refills and the first
-// map/flute fade frame still present live gameplay, so they may keep the
-// saved module's border-fill behavior.
+// be repeated into synthetic side padding. False here does not disable room
+// border fill; it asks the PPU to seed that fill before BG3 is composited.
+// Potion refills and the first map/flute fade frame still present live
+// gameplay, so they may keep the saved module's normal fill behavior.
 static bool Zelda_Module14UsesGameplayBorderFill() {
   if (submodule_index == 7 || submodule_index == 10)
     return overworld_map_state == 0 && Zelda_IsGameplayModuleForBg3Anchor(saved_module_for_menu);
@@ -464,10 +465,10 @@ static void ConfigurePpuSideSpace() {
     mod = 9;
   bool is_master_sword_grove = BYTE(overworld_screen_index) == 0x80 && dungeon_room_index == 0x180;
   bool light_cone_active = mod == 7 && hdr_dungeon_dark_with_lantern && TS_copy != 0;
-  bool allow_border_fill = main_module_index != 14 || Zelda_Module14UsesGameplayBorderFill();
+  bool fill_before_bg3 = main_module_index == 14 && !Zelda_Module14UsesGameplayBorderFill();
   PpuWidescreenBorderFillMode border_fill_mode = kPpuWidescreenBorderFill_None;
-  if (allow_border_fill && !light_cone_active &&
-      g_config.fill_extended_aspect_ratio_borders && g_config.extended_aspect_ratio != 0) {
+  if (!light_cone_active && g_config.fill_extended_aspect_ratio_borders &&
+      g_config.extended_aspect_ratio != 0) {
     if (mod == 9)
       border_fill_mode = is_master_sword_grove ?
           kPpuWidescreenBorderFill_GroveTileColumns : kPpuWidescreenBorderFill_TwoTileRepeat;
@@ -536,7 +537,8 @@ static void ConfigurePpuSideSpace() {
     extra_left = target_extra, extra_right = target_extra;
     extra_bottom = 16;
   }
-  PpuSetExtraSideSpace(g_zenv.ppu, extra_left, extra_right, extra_bottom, border_fill_mode);
+  PpuSetExtraSideSpace(g_zenv.ppu, extra_left, extra_right, extra_bottom,
+                       border_fill_mode, fill_before_bg3);
 }
 
 /*
