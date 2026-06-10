@@ -140,6 +140,7 @@ static bool ppu_getWindowState(Ppu* ppu, int layer, int x); // Test if pixel is 
 static bool ppu_evaluateSprites(Ppu* ppu, int line);        // Build sprite buffer for scanline
 static void PpuDrawWholeLine(Ppu *ppu, uint y);             // Whole-line renderer (new path)
 static void PpuFillMissingWidescreenBorders(Ppu *ppu, uint32 *dst, uint y); // Extend local edge content into padding
+static void PpuClearMissingWidescreenBorders(Ppu *ppu, uint32 *dst); // Clear side columns with no real pixels
 
 /*
  * Layer/window quick-test macros. The SNES exposes per-layer enable bits
@@ -219,6 +220,7 @@ void ppu_reset(Ppu* ppu) {
   ppu->extraRightCur = 0;
   ppu->extraBottomCur = 0;
   ppu->widescreenBorderFillMode = kPpuWidescreenBorderFill_None;
+  ppu->widescreenBorderFillBeforeBg3 = false;
   ppu->viewportLeftCur = 0;
   ppu->vramPointer = 0;
   ppu->vramIncrementOnHigh = false;
@@ -492,10 +494,7 @@ void ppu_runLine(Ppu *ppu, int line) {
 
       // Clear the widescreen padding the legacy compositor didn't write.
       uint8 *dst = ppu->renderBuffer + ((line - 1) * ppu->renderPitch);
-      if (ppu->extraLeftRight != 0) {
-        memset(dst, 0, sizeof(uint32) * ppu->extraLeftRight);
-        memset(dst + sizeof(uint32) * (256 + ppu->extraLeftRight), 0, sizeof(uint32) * ppu->extraLeftRight);
-      }
+      PpuClearMissingWidescreenBorders(ppu, (uint32*)dst);
       PpuFillMissingWidescreenBorders(ppu, (uint32*)dst, line);
       PpuDrawWideHudOverlay(ppu, line, (uint32*)dst);
     }
@@ -1273,10 +1272,14 @@ void PpuSetMode7PerspectiveCorrection(Ppu *ppu, int low, int high) {
  * maximum, 96 when widescreen is enabled). `bottom` is clamped to 16
  * (the maximum extra rows below the standard 224). `fill_mode`
  * lets configured screens synthesize unused side padding from local edge art.
+ * When `fill_before_bg3` is set, the whole-line renderer seeds that fill from
+ * a BG1/BG2/OBJ pass before compositing BG3, so menu and text frames remain
+ * 4:3 while the room behind them keeps its filled side padding.
  * The renderer consults extraLeftCur/extraRightCur/extraBottomCur to
  * expand the rendered region.
  */
-void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom, PpuWidescreenBorderFillMode fill_mode) {
+void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom,
+                          PpuWidescreenBorderFillMode fill_mode, bool fill_before_bg3) {
   ppu->extraLeftCur = UintMin(left, ppu->extraLeftRight);
   ppu->extraRightCur = UintMin(right, ppu->extraLeftRight);
   ppu->extraBottomCur = UintMin(bottom, 16);
@@ -1284,6 +1287,7 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom, PpuWidescre
       fill_mode != kPpuWidescreenBorderFill_GroveTileColumns)
     PpuResetGroveTileColumnWidescreenBorders();
   ppu->widescreenBorderFillMode = fill_mode;
+  ppu->widescreenBorderFillBeforeBg3 = fill_before_bg3;
   int target_extra = ppu->extraLeftRight >> 1;
   int wanted_total = target_extra * 2;
   ppu->viewportLeftCur = (ppu->extraLeftCur + ppu->extraRightCur >= wanted_total) ?
@@ -1310,8 +1314,19 @@ static void PpuFillRepeatedEdgeStripWidescreenBorders(uint32 *dst, int full_widt
   }
 }
 
+static void PpuClearMissingWidescreenBorders(Ppu *ppu, uint32 *dst) {
+  int missing_left = ppu->extraLeftRight - ppu->extraLeftCur;
+  int missing_right = ppu->extraLeftRight - ppu->extraRightCur;
+  if (missing_left > 0)
+    memset(dst, 0, sizeof(uint32) * missing_left);
+  if (missing_right > 0) {
+    int right_start = 256 + ppu->extraLeftRight * 2 - missing_right;
+    memset(dst + right_start, 0, sizeof(uint32) * missing_right);
+  }
+}
+
 /*
- * Fill widescreen side columns after the normal scene render.
+ * Fill widescreen side columns after the scene/background render.
  * Structured rooms fill only missing padding with a 16-pixel edge repeat. The
  * Master Sword grove overwrites its complete side-border bands from editable
  * tile tables so authored columns are never mixed with temporary edge capture.
@@ -1556,6 +1571,8 @@ static void PpuDrawMode7Upsampled(Ppu *ppu, uint y) {
  * sub-screen pass into bgBuffers[sub], in priority order.
  *
  * Only mode 1 and mode 7 are implemented (Zelda 3's only two BG modes).
+ * `include_bg3` is false only for the menu-fill prepass that protects
+ * synthetic widescreen borders from sampling BG3 menu/text frames.
  * The priority bucket constants (0xc000, 0xb100, 0xf200, etc.) encode
  * "high nibble of high byte = bucket, low byte = palette base or 0"
  * so that the per-pixel zhi/zlo compare against the running z-buffer
@@ -1564,7 +1581,7 @@ static void PpuDrawMode7Upsampled(Ppu *ppu, uint y) {
  * comment is the canonical map from bucket value to layer; do not edit
  * those without also updating the BG draw calls.
  */
-static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
+static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub, bool include_bg3) {
 // Top 4 bits contain the prio level, and bottom 4 bits the layer type.
 // SPRITE_PRIO_TO_PRIO can be used to convert from obj prio to this prio.
 //  15: BG3 tiles with priority 1 if bit 3 of $2105 is set
@@ -1594,10 +1611,12 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
     else
       PpuDrawBackground_4bpp(ppu, y, sub, 1, 0xb100, 0x7100);
 
-    if (IS_MOSAIC_ENABLED(ppu, 2))
-      PpuDrawBackground_2bpp_mosaic(ppu, y, sub, 2, 0xf200, 0x1200);
-    else
-      PpuDrawBackground_2bpp(ppu, y, sub, 2, 0xf200, 0x1200);
+    if (include_bg3) {
+      if (IS_MOSAIC_ENABLED(ppu, 2))
+        PpuDrawBackground_2bpp_mosaic(ppu, y, sub, 2, 0xf200, 0x1200);
+      else
+        PpuDrawBackground_2bpp(ppu, y, sub, 2, 0xf200, 0x1200);
+    }
   } else {
     // mode 7
     PpuDrawBackground_mode7(ppu, y, sub, 0xc000);
@@ -1606,73 +1625,25 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
   }
 }
 
-/*
- * PpuDrawWholeLine — Whole-scanline path for the modern renderer.
- *
- * Pipeline for one visible scanline:
- *   1. If forced-blank ($2100 bit 7), zero the output row and return.
- *   2. If Mode 7 + 4× upsampling is selected, hand off to the
- *      PpuDrawMode7Upsampled fast path (it writes RGBA directly).
- *   3. Clear bgBuffers[0] (main-screen z-buffer) to the backdrop value.
- *   4. PpuDrawBackgrounds(main): fill bgBuffers[0] with BG1/BG2/BG3 +
- *      sprites in their priority buckets.
- *   5. If color math is "add subscreen" and any layer participates,
- *      clear bgBuffers[1] and draw the sub-screen the same way.
- *   6. Build the color-window decisions for this line into a per-
- *      region bitmask. There are up to 5 regions; for each, two bits
- *      say "clip main RGB to black?" and "perform math?".
- *   7. Walk the regions left-to-right, doing one of two inner loops:
- *      - Fast path: no math active in this region, so the output is
- *        just brightness-mapped CGRAM lookup of the main bucket.
- *      - Slow path: per-pixel math. Check the main pixel's layer
- *        against mathEnabled; if math is on, fetch the sub-pixel (or
- *        fixed color), add or subtract, optionally halve, clip and
- *        emit the RGB.
- *   8. Zero out any widescreen padding the main draw didn't cover.
- *
- * cw_clip_math encoding:
- *   bit 0..(nr-1): "clip RGB to zero in this region" (color clip)
- *   bit 8..(8+nr-1): "color math is active in this region" (math clip)
- *   The do/while at the end of the loop does `cw_clip_math >>= 1` so
- *   bit 0 always represents the current region's clip flag, and bit 8
- *   always represents the current region's math flag.
- *
- * cgram word format: 0bbbbbgg gggrrrrr (15-bit BGR). The fast and slow
- * paths both treat r/g/b independently and feed each through
- * brightnessMult/brightnessMultHalf to land in 0..255.
- */
-static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
-  if (ppu->forcedBlank) {
-    uint8 *dst = &ppu->renderBuffer[(y - 1) * ppu->renderPitch];
-    size_t n = sizeof(uint32) * (256 + ppu->extraLeftRight * 2);
-    memset(dst, 0, n);
-    return;
-  }
-
-  if (ppu->mode == 7 && (ppu->renderFlags & kPpuRenderFlags_4x4Mode7)) {
-    PpuDrawMode7Upsampled(ppu, y);
-    return;
-  }
-
-  // Default background is backdrop
+static bool PpuDrawMainAndSubScreens(Ppu *ppu, uint y, bool include_bg3, uint32 *math_enabled_out) {
   ClearBackdrop(&ppu->bgBuffers[0]);
+  PpuDrawBackgrounds(ppu, y, false, include_bg3);
 
-  // Render main screen
-  PpuDrawBackgrounds(ppu, y, false);
-
-  // The 6:th bit is automatically zero, math is never applied to the first half of the sprites.
   uint32 math_enabled = ppu->mathEnabled;
-
-  // Render also the subscreen?
   bool rendered_subscreen = false;
   if (ppu->preventMathMode != 3 && ppu->addSubscreen && math_enabled) {
     ClearBackdrop(&ppu->bgBuffers[1]);
     if (ppu->screenEnabled[1] != 0) {
-      PpuDrawBackgrounds(ppu, y, true);
+      PpuDrawBackgrounds(ppu, y, true, include_bg3);
       rendered_subscreen = true;
     }
   }
 
+  *math_enabled_out = math_enabled;
+  return rendered_subscreen;
+}
+
+static void PpuCompositeLine(Ppu *ppu, uint y, uint32 math_enabled, bool rendered_subscreen) {
   // Color window affects the drawing mode in each region
   PpuWindows cwin;
   PpuWindows_Calc(&cwin, ppu, 5);
@@ -1681,15 +1652,16 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
     0xff, 0x00, 0xff, 0x00,
   };
   uint32 cw_clip_math = ((cwin.bits & kCwBitsMod[ppu->clipMode]) ^ kCwBitsMod[ppu->clipMode + 4]) |
-                        ((cwin.bits & kCwBitsMod[ppu->preventMathMode]) ^ kCwBitsMod[ppu->preventMathMode + 4]) << 8;
+                        ((cwin.bits & kCwBitsMod[ppu->preventMathMode]) ^
+                         kCwBitsMod[ppu->preventMathMode + 4]) << 8;
 
-  uint32 *dst = (uint32*)&ppu->renderBuffer[(y - 1) * ppu->renderPitch], *dst_org = dst;
-  
-  dst += (ppu->extraLeftRight - ppu->extraLeftCur);
+  uint32 *dst = (uint32*)&ppu->renderBuffer[(y - 1) * ppu->renderPitch];
+  dst += ppu->extraLeftRight - ppu->extraLeftCur;
 
   uint32 windex = 0;
   do {
-    uint32 left = cwin.edges[windex] + kPpuExtraLeftRight, right = cwin.edges[windex + 1] + kPpuExtraLeftRight;
+    uint32 left = cwin.edges[windex] + kPpuExtraLeftRight;
+    uint32 right = cwin.edges[windex + 1] + kPpuExtraLeftRight;
     // If clip is set, then zero out the rgb values from the main screen.
     uint32 clip_color_mask = (cw_clip_math & 1) ? 0x1f : 0;
     uint32 math_enabled_cur = (cw_clip_math & 0x100) ? math_enabled : 0;
@@ -1740,14 +1712,65 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
       } while (dst++, ++i < right);
     }
   } while (cw_clip_math >>= 1, ++windex < cwin.nr);
+}
+
+/*
+ * PpuDrawWholeLine — Whole-scanline path for the modern renderer.
+ *
+ * Pipeline for one visible scanline:
+ *   1. If forced-blank ($2100 bit 7), zero the output row and return.
+ *   2. If Mode 7 + 4× upsampling is selected, hand off to the
+ *      PpuDrawMode7Upsampled fast path (it writes RGBA directly).
+ *   3. Draw and composite the main/sub screens. Normally this includes BG3.
+ *      Module-14 menu frames can request a first pass without BG3 so the
+ *      side-border filler samples room art instead of menu panels.
+ *   4. PpuCompositeLine builds the color-window decisions and walks each
+ *      region through the fast or color-math pixel loop.
+ *   5. Clear and fill any widescreen padding the draw did not cover.
+ *   6. If that BG3-excluded fill pass ran, draw and composite the line again
+ *      with BG3 included. BG3 itself is still clipped to the 4:3 layer span.
+ *   7. Draw the optional software widescreen HUD overlay last.
+ *
+ * cw_clip_math encoding:
+ *   bit 0..(nr-1): "clip RGB to zero in this region" (color clip)
+ *   bit 8..(8+nr-1): "color math is active in this region" (math clip)
+ *   The do/while at the end of the loop does `cw_clip_math >>= 1` so
+ *   bit 0 always represents the current region's clip flag, and bit 8
+ *   always represents the current region's math flag.
+ *
+ * cgram word format: 0bbbbbgg gggrrrrr (15-bit BGR). The fast and slow
+ * paths both treat r/g/b independently and feed each through
+ * brightnessMult/brightnessMultHalf to land in 0..255.
+ */
+static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
+  if (ppu->forcedBlank) {
+    uint8 *dst = &ppu->renderBuffer[(y - 1) * ppu->renderPitch];
+    size_t n = sizeof(uint32) * (256 + ppu->extraLeftRight * 2);
+    memset(dst, 0, n);
+    return;
+  }
+
+  if (ppu->mode == 7 && (ppu->renderFlags & kPpuRenderFlags_4x4Mode7)) {
+    PpuDrawMode7Upsampled(ppu, y);
+    return;
+  }
+
+  uint32 *dst_org = (uint32*)&ppu->renderBuffer[(y - 1) * ppu->renderPitch];
+  bool fill_before_bg3 = ppu->widescreenBorderFillBeforeBg3 &&
+                         ppu->widescreenBorderFillMode != kPpuWidescreenBorderFill_None &&
+                         ppu->mode == 1;
+  uint32 math_enabled;
+  bool rendered_subscreen = PpuDrawMainAndSubScreens(ppu, y, !fill_before_bg3, &math_enabled);
+  PpuCompositeLine(ppu, y, math_enabled, rendered_subscreen);
 
   // Clear out stuff on the sides.
-  if (ppu->extraLeftRight - ppu->extraLeftCur != 0)
-    memset(dst_org, 0, sizeof(uint32) * (ppu->extraLeftRight - ppu->extraLeftCur));
-  if (ppu->extraLeftRight - ppu->extraRightCur != 0)
-    memset(dst_org + (256 + ppu->extraLeftRight * 2 - (ppu->extraLeftRight - ppu->extraRightCur)), 0,
-        sizeof(uint32) * (ppu->extraLeftRight - ppu->extraRightCur));
+  PpuClearMissingWidescreenBorders(ppu, dst_org);
   PpuFillMissingWidescreenBorders(ppu, dst_org, y);
+
+  if (fill_before_bg3) {
+    rendered_subscreen = PpuDrawMainAndSubScreens(ppu, y, true, &math_enabled);
+    PpuCompositeLine(ppu, y, math_enabled, rendered_subscreen);
+  }
   PpuDrawWideHudOverlay(ppu, y, dst_org);
 }
 

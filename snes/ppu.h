@@ -174,6 +174,7 @@ struct Ppu {
   uint8_t lastMosaicModulo;   // Cached mosaic LUT version (rebuild on mosaic size change)
   uint8_t renderFlags;     // Active render feature flags (see kPpuRenderFlags_*)
   uint8_t widescreenBorderFillMode; // PpuWidescreenBorderFillMode for unused side padding
+  bool widescreenBorderFillBeforeBg3; // Fill menu-time side padding before BG3 UI is composited
   bool renderWideHud;      // Draw BG3 HUD over the full widescreen viewport
   bool anchorWideHudBg3;   // Apply BG3 HUD anchoring only while the legacy gameplay strip is active
   const uint16_t *wideHudTilemap; // 64-column widescreen HUD tilemap supplied by the game layer
@@ -293,8 +294,11 @@ int PpuGetCurrentRenderScale(Ppu *ppu, uint32_t render_flags);
 // Configure perspective correction strength for Mode 7 rendering.
 // `low` and `high` define the scanline range over which correction ramps.
 void PpuSetMode7PerspectiveCorrection(Ppu *ppu, int low, int high);
-// Configure extra pixels rendered beyond the standard 256×224 area.
-void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom, PpuWidescreenBorderFillMode fill_mode);
+// Configure extra pixels rendered beyond the standard 256x224 area.
+// `fill_before_bg3` lets module-14 menus keep gameplay side fill without
+// letting their BG3 frames become the repeated edge source.
+void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom,
+                          PpuWidescreenBorderFillMode fill_mode, bool fill_before_bg3);
 void PpuSetRenderWideHud(Ppu *ppu, bool enabled, bool anchor_bg3, const uint16_t *tilemap, uint8_t shadow_size);
 
 #endif  // ZELDA3_SNES_PPU_H_
