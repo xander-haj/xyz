@@ -5,6 +5,8 @@ appdir="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
 data_base="${XDG_DATA_HOME:-$HOME/.local/share}"
 data_dir="${data_base}/Z3R"
 
+export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-pulseaudio}"
+
 for lib_dir in "${appdir}/usr/lib" "${appdir}/usr/lib/x86_64-linux-gnu"; do
   if [ -d "${lib_dir}" ]; then
     export LD_LIBRARY_PATH="${lib_dir}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"

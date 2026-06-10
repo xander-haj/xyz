@@ -6,6 +6,8 @@ data_base="${XDG_DATA_HOME:-$HOME/.local/share}"
 config_dir="${config_base}/Z3R"
 data_dir="${data_base}/Z3R"
 
+export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-pulseaudio}"
+
 mkdir -p "${config_dir}" "${data_dir}/saves"
 
 if [ ! -f "${config_dir}/zelda3.ini" ]; then
