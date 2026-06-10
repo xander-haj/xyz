@@ -57,7 +57,9 @@ jobs:
       run: |
         sudo apt install -y wget
         mkdir -p AppDir/usr/bin AppDir/usr/share/Z3R AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps dist
+        cc packaging/appimage/missing_assets_dialog.c $(sdl2-config --cflags --libs) -o z3r-missing-assets-dialog
         install -Dm755 zelda3 AppDir/usr/bin/zelda3.real
+        install -Dm755 z3r-missing-assets-dialog AppDir/usr/bin/z3r-missing-assets-dialog
         install -Dm755 packaging/appimage/AppRun AppDir/AppRun
         install -Dm644 zelda3.ini AppDir/usr/share/Z3R/zelda3.ini
         install -Dm644 packaging/flatpak/io.github.xander_haj.Z3R.desktop AppDir/usr/share/applications/io.github.xander_haj.Z3R.desktop
@@ -69,6 +71,7 @@ jobs:
         ./squashfs-root/AppRun \
           --appdir AppDir \
           --executable AppDir/usr/bin/zelda3.real \
+          --executable AppDir/usr/bin/z3r-missing-assets-dialog \
           --desktop-file AppDir/usr/share/applications/io.github.xander_haj.Z3R.desktop \
           --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/io.github.xander_haj.Z3R.svg \
           --output appimage

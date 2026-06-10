@@ -2,26 +2,38 @@
 set -eu
 
 appdir="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
-config_base="${XDG_CONFIG_HOME:-$HOME/.config}"
 data_base="${XDG_DATA_HOME:-$HOME/.local/share}"
-config_dir="${config_base}/Z3R"
 data_dir="${data_base}/Z3R"
 
-mkdir -p "${config_dir}" "${data_dir}/saves"
+for lib_dir in "${appdir}/usr/lib" "${appdir}/usr/lib/x86_64-linux-gnu"; do
+  if [ -d "${lib_dir}" ]; then
+    export LD_LIBRARY_PATH="${lib_dir}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+  fi
+done
 
-if [ ! -f "${config_dir}/zelda3.ini" ]; then
-  cp "${appdir}/usr/share/Z3R/zelda3.ini" "${config_dir}/zelda3.ini"
-fi
+mkdir -p "${data_dir}/saves"
 
-if [ ! -e "${config_dir}/saves" ] && [ ! -L "${config_dir}/saves" ]; then
-  ln -s "${data_dir}/saves" "${config_dir}/saves"
-fi
-
-if [ ! -e "${config_dir}/zelda3_assets.dat" ] && [ ! -L "${config_dir}/zelda3_assets.dat" ]; then
-  ln -s "${data_dir}/zelda3_assets.dat" "${config_dir}/zelda3_assets.dat"
+if [ ! -f "${data_dir}/zelda3.ini" ]; then
+  cp "${appdir}/usr/share/Z3R/zelda3.ini" "${data_dir}/zelda3.ini"
 fi
 
 if [ ! -f "${data_dir}/zelda3_assets.dat" ]; then
+  if [ -x "${appdir}/usr/bin/z3r-missing-assets-dialog" ] &&
+      "${appdir}/usr/bin/z3r-missing-assets-dialog" "${data_dir}/zelda3_assets.dat"; then
+    :
+  elif command -v zenity >/dev/null 2>&1; then
+    zenity --error \
+      --title="Z3R Missing Assets" \
+      --text="Z3R could not find zelda3_assets.dat.\n\nGenerate zelda3_assets.dat from your own legally dumped compatible ROM, then place it here:\n\n${data_dir}/zelda3_assets.dat" || true
+  elif command -v kdialog >/dev/null 2>&1; then
+    kdialog --error "Z3R could not find zelda3_assets.dat.\n\nGenerate zelda3_assets.dat from your own legally dumped compatible ROM, then place it here:\n\n${data_dir}/zelda3_assets.dat" --title "Z3R Missing Assets" || true
+  elif command -v xmessage >/dev/null 2>&1; then
+    xmessage -center "Z3R could not find zelda3_assets.dat.
+
+Generate zelda3_assets.dat from your own legally dumped compatible ROM, then place it here:
+
+${data_dir}/zelda3_assets.dat" || true
+  fi
   printf '%s\n' \
     "Z3R could not find zelda3_assets.dat." \
     "Generate zelda3_assets.dat from your own legally dumped compatible ROM," \
@@ -30,5 +42,5 @@ if [ ! -f "${data_dir}/zelda3_assets.dat" ]; then
   exit 1
 fi
 
-cd "${config_dir}"
-exec "${appdir}/usr/bin/zelda3.real" --config "${config_dir}/zelda3.ini" "$@"
+cd "${data_dir}"
+exec "${appdir}/usr/bin/zelda3.real" --config "${data_dir}/zelda3.ini" "$@"
