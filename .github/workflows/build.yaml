@@ -2,11 +2,8 @@ name: Build
 
 on:
   push:
-    branches:
-    - '**'
     tags:
-    - '**'
-  pull_request:
+    - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -21,23 +18,29 @@ jobs:
       matrix:
         include:
         - name: Linux
+          platform: linux
           os: ubuntu-latest
           archive: Z3R-linux-x64.tar.gz
-        - name: Mac
-          os: macos-13
-          archive: Z3R-macos-x64.tar.gz
+        - name: Mac Intel
+          platform: macos
+          os: macos-15-intel
+          archive: Z3R-macos-intel.tar.gz
+        - name: Mac Apple Silicon
+          platform: macos
+          os: macos-15
+          archive: Z3R-macos-apple-silicon.tar.gz
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-python@v5
       with:
         python-version: '3.10'
     - name: Install dependencies for Linux
-      if: ${{ matrix.name == 'Linux' }}
+      if: ${{ matrix.platform == 'linux' }}
       run: |
         sudo apt update
         sudo apt install -y libsdl2-dev
     - name: Install dependencies for Mac
-      if: ${{ matrix.name == 'Mac' }}
+      if: ${{ matrix.platform == 'macos' }}
       run: |
         brew install sdl2
     - name: Build
