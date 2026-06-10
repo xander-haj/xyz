@@ -54,28 +54,42 @@ jobs:
       if: ${{ matrix.platform == 'linux' }}
       env:
         LINUXDEPLOY_URL: https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+        APPIMAGETOOL_URL: https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
       run: |
         sudo apt install -y wget
         mkdir -p AppDir/usr/bin AppDir/usr/share/Z3R AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps dist
         cc packaging/appimage/missing_assets_dialog.c $(sdl2-config --cflags --libs) -o z3r-missing-assets-dialog
         install -Dm755 zelda3 AppDir/usr/bin/zelda3.real
         install -Dm755 z3r-missing-assets-dialog AppDir/usr/bin/z3r-missing-assets-dialog
-        install -Dm755 packaging/appimage/AppRun AppDir/AppRun
         install -Dm644 zelda3.ini AppDir/usr/share/Z3R/zelda3.ini
-        install -Dm644 packaging/flatpak/io.github.xander_haj.Z3R.desktop AppDir/usr/share/applications/io.github.xander_haj.Z3R.desktop
+        install -Dm644 packaging/appimage/io.github.xander_haj.Z3R.desktop AppDir/usr/share/applications/io.github.xander_haj.Z3R.desktop
+        install -Dm644 packaging/appimage/io.github.xander_haj.Z3R.desktop AppDir/io.github.xander_haj.Z3R.desktop
         install -Dm644 packaging/flatpak/io.github.xander_haj.Z3R.svg AppDir/usr/share/icons/hicolor/scalable/apps/io.github.xander_haj.Z3R.svg
+        install -Dm644 packaging/flatpak/io.github.xander_haj.Z3R.svg AppDir/io.github.xander_haj.Z3R.svg
 
         wget -q "${LINUXDEPLOY_URL}" -O linuxdeploy-x86_64.AppImage
         chmod +x linuxdeploy-x86_64.AppImage
         ./linuxdeploy-x86_64.AppImage --appimage-extract
-        ./squashfs-root/AppRun \
+        mv squashfs-root linuxdeploy-root
+        ./linuxdeploy-root/AppRun \
           --appdir AppDir \
           --executable AppDir/usr/bin/zelda3.real \
           --executable AppDir/usr/bin/z3r-missing-assets-dialog \
-          --desktop-file AppDir/usr/share/applications/io.github.xander_haj.Z3R.desktop \
-          --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/io.github.xander_haj.Z3R.svg \
-          --output appimage
-        mv Z3R-*.AppImage dist/Z3R-linux-x64.AppImage
+          --desktop-file AppDir/io.github.xander_haj.Z3R.desktop \
+          --icon-file AppDir/io.github.xander_haj.Z3R.svg
+
+        install -Dm755 packaging/appimage/AppRun AppDir/AppRun
+        ln -sf ../../AppRun AppDir/usr/bin/z3r
+        install -Dm644 packaging/appimage/io.github.xander_haj.Z3R.desktop AppDir/io.github.xander_haj.Z3R.desktop
+        ln -sf usr/share/icons/hicolor/scalable/apps/io.github.xander_haj.Z3R.svg AppDir/io.github.xander_haj.Z3R.svg
+
+        wget -q "${APPIMAGETOOL_URL}" -O appimagetool-x86_64.AppImage
+        chmod +x appimagetool-x86_64.AppImage
+        ./appimagetool-x86_64.AppImage --appimage-extract
+        mv squashfs-root appimagetool-root
+        ARCH=x86_64 ./appimagetool-root/AppRun AppDir dist/Z3R-linux-x64.AppImage
+        chmod +x dist/Z3R-linux-x64.AppImage
+        tar -czf dist/Z3R-linux-x64.AppImage.tar.gz -C dist Z3R-linux-x64.AppImage
     - name: Upload ${{ matrix.name }} artifact
       uses: actions/upload-artifact@v6
       with:
@@ -86,8 +100,8 @@ jobs:
       if: ${{ matrix.platform == 'linux' }}
       uses: actions/upload-artifact@v6
       with:
-        name: Z3R-linux-x64.AppImage
-        path: dist/Z3R-linux-x64.AppImage
+        name: Z3R-linux-x64.AppImage.tar.gz
+        path: dist/Z3R-linux-x64.AppImage.tar.gz
         if-no-files-found: error
     - name: Upload ${{ matrix.name }} release asset
       if: startsWith(github.ref, 'refs/tags/')
@@ -99,7 +113,9 @@ jobs:
       if: ${{ matrix.platform == 'linux' && startsWith(github.ref, 'refs/tags/') }}
       uses: softprops/action-gh-release@v3
       with:
-        files: dist/Z3R-linux-x64.AppImage
+        files: |
+          dist/Z3R-linux-x64.AppImage
+          dist/Z3R-linux-x64.AppImage.tar.gz
         generate_release_notes: true
 
   build-windows:
