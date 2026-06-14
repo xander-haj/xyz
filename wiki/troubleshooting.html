@@ -1,0 +1,121 @@
+<!--
+  Z3R troubleshooting wiki page. This static page collects the common setup,
+  asset, build, and package-location failures from the project documentation.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Z3R Wiki - Troubleshooting</title>
+  <meta name="description" content="Troubleshooting common Z3R setup and build errors.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="components.css">
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="site-header">
+    <nav class="topbar" aria-label="Primary">
+      <a class="brand" href="index.html">
+        <svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true">
+          <rect width="256" height="256" rx="32" fill="#10231b"></rect>
+          <path d="M50 58h156v30l-95 80h95v30H50v-30l95-80H50z" fill="#f6c945"></path>
+          <path d="M72 116h112v24H72z" fill="#45b6d6"></path>
+          <path d="M76 216h104" stroke="#f6c945" stroke-width="12" stroke-linecap="round"></path>
+        </svg>
+        <span>Z3R Wiki</span>
+      </a>
+      <div class="topbar-actions">
+        <a href="index.html">Guide home</a>
+        <a href="flatpak.html">Flatpak</a>
+      </div>
+    </nav>
+    <section class="hero" id="top">
+      <div class="hero-copy">
+        <p class="eyebrow">Troubleshooting</p>
+        <h1>Fix the usual setup, build, and missing-asset problems.</h1>
+        <p>Most failures come from missing prerequisites, unsupported ROM input, or package-specific asset paths.</p>
+      </div>
+    </section>
+  </header>
+  <main class="wiki-shell" id="content">
+    <aside class="sidebar" aria-label="Troubleshooting navigation">
+      <nav class="sidebar-nav">
+        <a href="#assets">ROM and assets</a>
+        <a href="#python">Python packages</a>
+        <a href="#sdl">SDL2</a>
+        <a href="#windows">Windows builds</a>
+        <a href="#package-paths">Package paths</a>
+      </nav>
+    </aside>
+    <div class="content-stack">
+      <section class="doc-section" id="assets" data-tags="rom assets hash missing">
+        <p class="section-kicker">ROM and assets</p>
+        <h2>Asset extraction needs a compatible USA ROM.</h2>
+        <div class="faq-list">
+          <details open>
+            <summary><code>Could not find any ROMs</code></summary>
+            <p>
+              Place <code>zelda3.sfc</code> or <code>zelda3.smc</code> at the project root,
+              or pass <code>-r</code> with a path relative to the project root.
+            </p>
+          </details>
+          <details>
+            <summary><code>ROM hash not supported</code></summary>
+            <p>Normal extraction expects the USA release of A Link to the Past.</p>
+          </details>
+        </div>
+      </section>
+      <section class="doc-section" id="python" data-tags="python pil yaml requirements venv">
+        <p class="section-kicker">Python</p>
+        <h2>Use the project virtual environment for asset tools.</h2>
+        <p>
+          If Python reports <code>No module named PIL</code> or <code>No module named yaml</code>,
+          install <code>requirements.txt</code> into the project venv and run tools through that venv.
+        </p>
+        <pre><code>python3 -m venv venv
+source venv/bin/activate
+python -m pip install -r requirements.txt</code></pre>
+      </section>
+      <section class="doc-section" id="sdl" data-tags="sdl2 config development files">
+        <p class="section-kicker">SDL2</p>
+        <h2><code>sdl2-config</code> is required for Make builds.</h2>
+        <p>
+          Install SDL2 development files. On Debian/Ubuntu, use <code>libsdl2-dev</code>.
+          On macOS with Homebrew, install <code>sdl2</code>.
+        </p>
+      </section>
+      <section class="doc-section" id="windows" data-tags="windows visual studio tcc sdl dll">
+        <p class="section-kicker">Windows builds</p>
+        <h2>Visual Studio and TCC have different dependency paths.</h2>
+        <ul class="plain-list">
+          <li>Visual Studio missing SDL2 targets: restore NuGet packages for <code>Zelda3.sln</code>.</li>
+          <li>TCC missing compiler: place <code>tcc.exe</code> at <code>third_party\tcc\tcc.exe</code>.</li>
+          <li>
+            TCC missing SDL: place <code>SDL2.dll</code> at
+            <code>third_party\SDL2-2.26.3\lib\x64\SDL2.dll</code>.
+          </li>
+        </ul>
+      </section>
+      <section class="doc-section" id="package-paths" data-tags="config assets executable appimage flatpak">
+        <p class="section-kicker">Package paths</p>
+        <h2>Asset location depends on the package type.</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Package</th><th>Expected asset location</th></tr></thead>
+            <tbody>
+              <tr><td>Source or tarball</td><td>Beside the executable or in the project root.</td></tr>
+              <tr><td>AppImage</td><td><code>~/.local/share/Z3R/zelda3_assets.dat</code></td></tr>
+              <tr>
+                <td>Flatpak</td>
+                <td><code>~/.var/app/io.github.xander_haj.Z3R/data/Z3R/zelda3_assets.dat</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="app.js" defer></script>
+</body>
+</html>

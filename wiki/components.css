@@ -1,0 +1,192 @@
+/*
+  Z3R wiki content components. These styles are separated from the base theme
+  so each static stylesheet remains small, reviewable, and under the project line limit.
+*/
+.content-stack {
+  display: grid;
+  gap: 22px;
+}
+
+.doc-section {
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 248, 232, 0.94);
+  box-shadow: var(--shadow);
+}
+
+.doc-section h2 {
+  margin: 0 0 12px;
+  color: var(--forest);
+  font-size: clamp(1.55rem, 3vw, 2.4rem);
+  line-height: 1.15;
+}
+
+.doc-section h3 {
+  margin: 20px 0 8px;
+  color: var(--forest-2);
+}
+
+.intro-grid,
+.split-grid,
+.feature-grid,
+.route-list {
+  display: grid;
+  gap: 18px;
+}
+
+.intro-grid {
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+}
+
+.route-list,
+.feature-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.route-card,
+.feature-grid article {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf5;
+}
+
+.route-step {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--gold);
+  color: var(--forest);
+  font-weight: 900;
+}
+
+.warning-band {
+  border-color: rgba(179, 59, 50, 0.36);
+  background: #fff1df;
+}
+
+.split-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.plain-list,
+.check-list {
+  padding-left: 20px;
+}
+
+.plain-list li,
+.check-list li {
+  margin: 8px 0;
+}
+
+.inline-link {
+  color: var(--forest);
+  font-weight: 800;
+  text-decoration-color: var(--gold);
+  text-decoration-thickness: 3px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.tab-button,
+.copy-button {
+  border: 1px solid var(--line);
+  background: #fffdf5;
+  color: var(--forest);
+  cursor: pointer;
+}
+
+.tab-button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.tab-button.is-active {
+  background: var(--forest);
+  color: var(--paper-2);
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.is-active {
+  display: block;
+}
+
+.copy-button {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  padding: 5px 8px;
+  font-size: 0.75rem;
+}
+
+.faq-list details {
+  border-top: 1px solid var(--line);
+  padding: 14px 0;
+}
+
+.faq-list summary {
+  cursor: pointer;
+  color: var(--forest);
+  font-weight: 800;
+}
+
+.is-hidden {
+  display: none;
+}
+
+@media (max-width: 920px) {
+  .hero,
+  .wiki-shell,
+  .intro-grid,
+  .split-grid,
+  .route-list,
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wiki-shell {
+    margin-top: 0;
+  }
+
+  .sidebar {
+    position: static;
+  }
+}
+
+@media (max-width: 620px) {
+  .topbar,
+  .topbar-actions,
+  .hero-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .hero,
+  .wiki-shell {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .doc-section {
+    padding: 22px 18px;
+  }
+}

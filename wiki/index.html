@@ -1,0 +1,397 @@
+<!--
+  Z3R GitHub Pages wiki. This static page reorganizes the root README,
+  launcher notes, release workflow, and Flatpak packaging docs into a user-facing guide.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Z3R Wiki</title>
+  <meta name="description" content="Setup, build, release, Flatpak, and randomizer guide for Z3R.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="components.css">
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+
+  <header class="site-header">
+    <nav class="topbar" aria-label="Primary">
+      <a class="brand" href="#top" aria-label="Z3R Wiki home">
+        <svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true">
+          <rect width="256" height="256" rx="32" fill="#10231b"></rect>
+          <path d="M50 58h156v30l-95 80h95v30H50v-30l95-80H50z" fill="#f6c945"></path>
+          <path d="M72 116h112v24H72z" fill="#45b6d6"></path>
+          <path d="M76 216h104" stroke="#f6c945" stroke-width="12" stroke-linecap="round"></path>
+        </svg>
+        <span>Z3R Wiki</span>
+      </a>
+      <div class="topbar-actions">
+        <a href="https://github.com/xander-haj/Z3R/releases">Releases</a>
+        <a href="https://github.com/xander-haj/Z3R">GitHub</a>
+      </div>
+    </nav>
+
+    <section class="hero" id="top">
+      <div class="hero-copy">
+        <p class="eyebrow">Native adventure engine, randomizer, and launcher docs</p>
+        <h1>Build Z3R without getting lost in one giant scroll.</h1>
+        <p>
+          This wiki turns the project README and packaging notes into a clear path for players,
+          builders, release users, and Flatpak testers.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="#start-here">Start setup</a>
+          <a class="button secondary" href="#release-builds">Use a release</a>
+        </div>
+      </div>
+      <div class="map-panel" aria-label="Decorative adventure map">
+        <div class="map-grid"></div>
+        <div class="map-node node-one"></div>
+        <div class="map-node node-two"></div>
+        <div class="map-node node-three"></div>
+        <div class="map-path"></div>
+        <div class="map-title">Z3R route</div>
+      </div>
+    </section>
+  </header>
+
+  <main class="wiki-shell" id="content">
+    <aside class="sidebar" aria-label="Wiki navigation">
+      <label class="search-label" for="wiki-search">Search the guide</label>
+      <input id="wiki-search" type="search" placeholder="ROM, Flatpak, SDL2" autocomplete="off">
+      <nav class="sidebar-nav">
+        <a href="#start-here">Start here</a>
+        <a href="#legal-boundary">Legal boundary</a>
+        <a href="#release-builds">Release builds</a>
+        <a href="#requirements">Requirements</a>
+        <a href="#source-setup">Source setup</a>
+        <a href="#asset-extraction">Asset extraction</a>
+        <a href="#build-run">Build and run</a>
+        <a href="launcher.html">Launcher</a>
+        <a href="#randomizer">Randomizer</a>
+        <a href="#configuration">Configuration</a>
+        <a href="#flatpak">Flatpak</a>
+        <a href="flatpak.html">Flatpak details</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a href="#publish">Publishing this wiki</a>
+      </nav>
+    </aside>
+
+    <div class="content-stack">
+      <section class="doc-section intro-grid" id="start-here" data-tags="start setup beginner first run">
+        <div>
+          <p class="section-kicker">Start here</p>
+          <h2>Pick the path that matches what you want to do.</h2>
+          <p>
+            Z3R does not ship ready-to-play copyrighted game data. Every path eventually needs
+            a compatible user-owned ROM so the project can generate <code>zelda3_assets.dat</code>.
+          </p>
+        </div>
+        <div class="route-list">
+          <article class="route-card">
+            <span class="route-step">1</span>
+            <h3>Use a release</h3>
+            <p>Download the archive or bundle, then provide the generated asset file it expects.</p>
+          </article>
+          <article class="route-card">
+            <span class="route-step">2</span>
+            <h3>Build from source</h3>
+            <p>Install Git, Python, SDL2, and a C build path, then extract assets and build the native executable.</p>
+          </article>
+          <article class="route-card">
+            <span class="route-step">3</span>
+            <h3>Randomize</h3>
+            <p>Extract clean YAML, run the conservative dungeon chest randomizer, then compile assets again.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="doc-section warning-band" id="legal-boundary" data-tags="legal rom copyright assets saves">
+        <p class="section-kicker">Important rule</p>
+        <h2>Bring your own legally dumped USA ROM.</h2>
+        <p>
+          Do not commit, upload, or redistribute <code>zelda3.sfc</code>, <code>zelda3.smc</code>,
+          <code>zelda3_assets.dat</code>, save files, MSU packs, extracted ROM YAML/PNG/audio data,
+          Nintendo artwork, or Nintendo logos. Z3R should distribute the open-source engine and ask
+          users to generate their own runtime assets.
+        </p>
+      </section>
+
+      <section class="doc-section" id="release-builds" data-tags="release zip tar appimage flatpak mac windows linux">
+        <p class="section-kicker">Release builds</p>
+        <h2>What release packages contain.</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Asset</th><th>Platform</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>Z3R-windows-x64.zip</code></td>
+                <td>Windows</td>
+                <td>
+                  Contains <code>zelda3.exe</code>, <code>SDL2.dll</code>,
+                  <code>zelda3.ini</code>, README, and license.
+                </td>
+              </tr>
+              <tr>
+                <td><code>Z3R-linux-x64.tar.gz</code></td>
+                <td>Linux</td>
+                <td>Contains the native Linux executable plus <code>zelda3.ini</code>, README, and license.</td>
+              </tr>
+              <tr>
+                <td><code>Z3R-linux-x64.AppImage</code></td>
+                <td>Linux</td>
+                <td>
+                  Uses <code>~/.local/share/Z3R/zelda3_assets.dat</code> and creates
+                  <code>~/.local/share/Z3R/saves/</code>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>Z3R-macos-intel.tar.gz</code></td>
+                <td>macOS Intel</td>
+                <td>Native macOS build archive.</td>
+              </tr>
+              <tr>
+                <td><code>Z3R-macos-apple-silicon.tar.gz</code></td>
+                <td>macOS Apple Silicon</td>
+                <td>Native macOS build archive for arm64 Macs.</td>
+              </tr>
+              <tr>
+                <td><code>Z3R-linux.flatpak</code></td>
+                <td>Linux Flatpak</td>
+                <td>Installs the app sandbox, but still needs a user-generated asset file.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Release packages are produced by the GitHub Actions workflow when a <code>v*</code> tag is published.
+          They intentionally do not include ROMs or generated assets.
+        </p>
+      </section>
+
+      <section class="doc-section" id="requirements" data-tags="requirements install git python sdl2 make msbuild tcc">
+        <p class="section-kicker">Requirements</p>
+        <h2>Install the right tools for your platform.</h2>
+        <div class="tabs" data-tabs="requirements-tabs">
+          <div class="tab-list" role="tablist" aria-label="Platform requirements">
+            <button class="tab-button is-active" type="button" data-tab="macos" role="tab">macOS</button>
+            <button class="tab-button" type="button" data-tab="linux" role="tab">Linux</button>
+            <button class="tab-button" type="button" data-tab="windows" role="tab">Windows</button>
+          </div>
+          <article class="tab-panel is-active" data-panel="macos" role="tabpanel">
+            <p>Install Apple command line tools, Git, Python 3, Make, and SDL2 development files.</p>
+            <pre><code>xcode-select --install
+brew install git python sdl2
+git --version
+python3 --version
+make --version
+sdl2-config --version</code></pre>
+          </article>
+          <article class="tab-panel" data-panel="linux" role="tabpanel">
+            <p>On Debian or Ubuntu, install Git, Python venv support, build tools, and SDL2 headers.</p>
+            <pre><code>sudo apt-get install git python3 python3-venv build-essential libsdl2-dev
+git --version
+python3 --version
+make --version
+sdl2-config --version</code></pre>
+          </article>
+          <article class="tab-panel" data-panel="windows" role="tabpanel">
+            <p>Install Git for Windows and Python 3 first, then choose Visual Studio, MSYS2, or TCC.</p>
+            <pre><code>git --version
+py --version
+python --version</code></pre>
+            <p>
+              For Visual Studio, install the Desktop development with C++ workload. For TCC, place
+              <code>tcc.exe</code> at <code>third_party\tcc\tcc.exe</code> and <code>SDL2.dll</code>
+              at <code>third_party\SDL2-2.26.3\lib\x64\SDL2.dll</code>.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="doc-section" id="source-setup" data-tags="clone venv requirements source setup submodules">
+        <p class="section-kicker">Source setup</p>
+        <h2>Clone the repo and prepare Python.</h2>
+        <pre><code>git clone --recursive https://github.com/xander-haj/Z3R
+cd Z3R</code></pre>
+        <p>If you already cloned without submodules, initialize them before building.</p>
+        <pre><code>git submodule update --init --recursive</code></pre>
+        <div class="split-grid">
+          <div>
+            <h3>macOS and Linux venv</h3>
+            <pre><code>python3 -m venv venv
+source venv/bin/activate
+python -m pip install -r requirements.txt</code></pre>
+          </div>
+          <div>
+            <h3>Windows venv</h3>
+            <pre><code>py -3 -m venv venv
+.\venv\Scripts\python -m pip install -r requirements.txt</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="asset-extraction" data-tags="rom extract assets zelda3_assets dat restool">
+        <p class="section-kicker">Asset extraction</p>
+        <h2>Generate <code>zelda3_assets.dat</code> from your ROM.</h2>
+        <p>
+          Place your compatible USA ROM at the project root as <code>zelda3.sfc</code>
+          or <code>zelda3.smc</code>.
+        </p>
+        <pre><code>Z3R/
+  zelda3.sfc
+  assets/
+  src/
+  zelda3.ini</code></pre>
+        <p>
+          The normal extraction command writes <code>zelda3_assets.dat</code> to the project root and
+          refreshes extracted files under <code>assets/</code>.
+        </p>
+        <pre><code>venv/bin/python assets/restool.py --extract-from-rom
+.\venv\Scripts\python assets\restool.py --extract-from-rom</code></pre>
+        <p>Use the first command on macOS/Linux and the second in Windows PowerShell.</p>
+      </section>
+
+      <section class="doc-section" id="build-run" data-tags="build run make visual studio tcc executable">
+        <p class="section-kicker">Build and run</p>
+        <h2>Compile the engine after assets exist.</h2>
+        <div class="split-grid">
+          <div>
+            <h3>macOS</h3>
+            <pre><code>make -j$(sysctl -n hw.logicalcpu)
+./zelda3</code></pre>
+          </div>
+          <div>
+            <h3>Linux</h3>
+            <pre><code>make -j$(nproc)
+./zelda3</code></pre>
+          </div>
+        </div>
+        <h3>Windows routes</h3>
+        <ul class="plain-list">
+          <li>
+            <strong>Visual Studio:</strong> extract assets, open <code>Zelda3.sln</code>,
+            restore NuGet packages, select <code>Release</code> and <code>x64</code>,
+            then build <code>zelda3</code>.
+          </li>
+          <li>
+            <strong>TCC:</strong> place TCC and SDL2 in the expected <code>third_party</code>
+            folders, confirm <code>zelda3_assets.dat</code> exists, then run
+            <code>.\run_with_tcc.bat</code>.
+          </li>
+          <li>
+            <strong>Moved executables:</strong> keep <code>zelda3.ini</code> and
+            <code>zelda3_assets.dat</code> beside the executable unless the package wrapper
+            documents another location.
+          </li>
+        </ul>
+      </section>
+
+      <section class="doc-section" id="randomizer" data-tags="randomizer seed safe mode spoiler yaml chest">
+        <p class="section-kicker">Randomizer</p>
+        <h2>Current randomizer scope.</h2>
+        <p>
+          The current randomizer is a conservative dungeon chest item shuffle. It does not yet shuffle
+          overworld checks, pots, NPC rewards, shops, boss prizes, entrances, exits, holes, sprites, or room layouts.
+        </p>
+        <pre><code>python assets/restool.py --extract-from-rom --no-build
+python assets/restool-randomize.py --generate-masterlist
+python assets/restool-randomize.py --seed my-first-seed --mode safe
+python assets/restool.py</code></pre>
+        <ul class="plain-list">
+          <li>The same seed produces the same shuffle.</li>
+          <li>Omitting <code>--seed</code> generates and prints a random seed.</li>
+          <li>
+            Spoiler logs are written to <code>assets/randomizer-spoilers/&lt;seed&gt;.md</code>
+            unless <code>--no-spoiler</code> is used.
+          </li>
+          <li>
+            Small keys and big-key-locked chest locations stay fixed unless you opt in with
+            <code>--include-small-keys</code> or <code>--include-big-chests</code>.
+          </li>
+          <li>
+            Run <code>python assets/restool-randomize.py --restore-vanilla</code> to restore
+            chest YAML from the masterlist.
+          </li>
+        </ul>
+      </section>
+
+      <section class="doc-section" id="configuration" data-tags="configuration ini graphics sound controls widescreen">
+        <p class="section-kicker">Configuration</p>
+        <h2>Use <code>zelda3.user.ini</code> for personal settings.</h2>
+        <p>
+          The executable checks <code>zelda3.user.ini</code> first, then falls back to
+          <code>zelda3.ini</code>.
+        </p>
+        <pre><code>!include zelda3.ini
+
+[Graphics]
+WindowScale = 4
+Fullscreen = 0
+
+[General]
+ExtendedAspectRatio = 16:9
+FillExtendedAspectRatioBorders = 1
+
+[Features]
+ItemSwitchLR = 1
+NewSettingsMenu = 1</code></pre>
+        <div class="feature-grid">
+          <article>
+            <h3>Graphics</h3>
+            <p>Set aspect ratio, renderer, filtering, shaders, sprites, fullscreen, and widescreen HUD behavior.</p>
+          </article>
+          <article>
+            <h3>Sound</h3>
+            <p>Set sample rate, buffer size, MSU mode, MSU path, resume behavior, and volume.</p>
+          </article>
+          <article>
+            <h3>Controls</h3>
+            <p>
+              <code>KeyMap</code> uses SDL key names. <code>GamepadMap</code> uses button names
+              such as <code>A</code>, <code>B</code>, <code>X</code>, <code>Y</code>,
+              <code>L1</code>, and <code>R1</code>.
+            </p>
+          </article>
+          <article>
+            <h3>Features</h3>
+            <p>Enable item L/R switching, settings menu, HUD rearrangement, convenience toggles, and bug-fix modes.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="doc-section" id="flatpak" data-tags="flatpak install bundle linux data config assets">
+        <p class="section-kicker">Flatpak users</p>
+        <h2>Install the bundle, then place generated assets in the sandbox data folder.</h2>
+        <pre><code>flatpak install --user ./Z3R-linux.flatpak
+flatpak run io.github.xander_haj.Z3R</code></pre>
+        <p>
+          The current wrapper creates config and save folders, copies the default INI on first run,
+          and exits with a missing-assets message until this file exists:
+        </p>
+        <pre><code>~/.var/app/io.github.xander_haj.Z3R/data/Z3R/zelda3_assets.dat</code></pre>
+        <p>
+          Settings live under <code>~/.var/app/io.github.xander_haj.Z3R/config/Z3R/</code>, and saves
+          live under the Flatpak data directory.
+        </p>
+        <p><a class="inline-link" href="flatpak.html">Open the detailed Flatpak and Flathub guide.</a></p>
+      </section>
+
+      <section class="doc-section" id="publish" data-tags="github pages publish wiki static">
+        <p class="section-kicker">Publishing this wiki</p>
+        <h2>GitHub Pages can serve these static files without a build.</h2>
+        <p>
+          Keep the files in <code>wiki/</code> together. If Pages is configured to publish the repository root,
+          the wiki will be available at <code>/wiki/</code>. If you publish from a dedicated Pages workflow,
+          point the upload step at the <code>wiki/</code> directory.
+        </p>
+      </section>
+    </div>
+  </main>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
