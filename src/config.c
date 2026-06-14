@@ -224,6 +224,40 @@ int FindCmdForSdlKey(int code, int mod) {
 }
 
 /*
+ * ParseKeyBinding — Parses one keyboard binding string and registers it in
+ * the keyboard hash table. The optional Key:/Keyboard: prefix is accepted so
+ * [GamepadMap] can store keyboard buttons without confusing "Key:A" with the
+ * gamepad face button named "A".
+ */
+static bool ParseKeyBinding(const char *value, int cmd) {
+  const char *s = StringStartsWithNoCase(value, "Key:");
+  if (!s)
+    s = StringStartsWithNoCase(value, "Keyboard:");
+  if (!s)
+    s = value;
+
+  int key_with_mod = 0;
+  for (;;) {
+    if (StringStartsWithNoCase(s, "Shift+")) {
+      key_with_mod |= kKeyMod_Shift, s += 6;
+    } else if (StringStartsWithNoCase(s, "Ctrl+")) {
+      key_with_mod |= kKeyMod_Ctrl, s += 5;
+    } else if (StringStartsWithNoCase(s, "Alt+")) {
+      key_with_mod |= kKeyMod_Alt, s += 4;
+    } else {
+      break;
+    }
+  }
+
+  SDL_Keycode key = SDL_GetKeyFromName(s);
+  if (key == SDLK_UNKNOWN)
+    return false;
+  if (!KeyMapHash_Add(key_with_mod | REMAP_SDL_KEYCODE(key), cmd))
+    fprintf(stderr, "Duplicate key: '%s'\n", value);
+  return true;
+}
+
+/*
  * ParseKeyArray — Parses a comma-separated list of key binding strings
  * from the INI file and registers each one in the hash table.
  *
@@ -238,27 +272,8 @@ static void ParseKeyArray(char *value, int cmd, int size) {
   for (; i < size && (s = NextDelim(&value, ',')) != NULL; i++, cmd += (cmd != 0)) {
     if (*s == 0)
       continue;    // Empty slot — leave unbound
-    // Accumulate modifier prefixes by stripping recognized prefixes
-    int key_with_mod = 0;
-    for (;;) {
-      if (StringStartsWithNoCase(s, "Shift+")) {
-        key_with_mod |= kKeyMod_Shift, s += 6;
-      } else if (StringStartsWithNoCase(s, "Ctrl+")) {
-        key_with_mod |= kKeyMod_Ctrl, s += 5;
-      } else if (StringStartsWithNoCase(s, "Alt+")) {
-        key_with_mod |= kKeyMod_Alt, s += 4;
-      } else {
-        break;
-      }
-    }
-    // Use SDL's built-in key name parser for the base key
-    SDL_Keycode key = SDL_GetKeyFromName(s);
-    if (key == SDLK_UNKNOWN) {
+    if (!ParseKeyBinding(s, cmd))
       fprintf(stderr, "Unknown key: '%s'\n", s);
-      continue;
-    }
-    if (!KeyMapHash_Add(key_with_mod | REMAP_SDL_KEYCODE(key), cmd))
-      fprintf(stderr, "Duplicate key: '%s'\n", s);
   }
 }
 
@@ -363,7 +378,8 @@ static int ParseGamepadButtonName(const char **value) {
   // (Lb→L1 and Rb→R1 are aliases sharing the same ID)
   static const uint8 kGamepadKeyIds[] = {
     kGamepadBtn_Back, kGamepadBtn_Guide, kGamepadBtn_Start, kGamepadBtn_L3, kGamepadBtn_R3,
-    kGamepadBtn_L1, kGamepadBtn_R1, kGamepadBtn_DpadUp, kGamepadBtn_DpadDown, kGamepadBtn_DpadLeft, kGamepadBtn_DpadRight, kGamepadBtn_L2, kGamepadBtn_R2,
+    kGamepadBtn_L1, kGamepadBtn_R1, kGamepadBtn_DpadUp, kGamepadBtn_DpadDown,
+    kGamepadBtn_DpadLeft, kGamepadBtn_DpadRight, kGamepadBtn_L2, kGamepadBtn_R2,
     kGamepadBtn_L1, kGamepadBtn_R1, kGamepadBtn_A, kGamepadBtn_B, kGamepadBtn_X, kGamepadBtn_Y,
   };
   for (size_t i = 0; i != countof(kGamepadKeyNames); i++) {
@@ -385,18 +401,39 @@ static int ParseGamepadButtonName(const char **value) {
  * positions (not labels) determine the mapping.
  */
 static const uint8 kDefaultGamepadCmds[] = {
-  kGamepadBtn_DpadUp, kGamepadBtn_DpadDown, kGamepadBtn_DpadLeft, kGamepadBtn_DpadRight, kGamepadBtn_Back, kGamepadBtn_Start,
+  kGamepadBtn_DpadUp, kGamepadBtn_DpadDown, kGamepadBtn_DpadLeft, kGamepadBtn_DpadRight,
+  kGamepadBtn_Back, kGamepadBtn_Start,
   kGamepadBtn_B, kGamepadBtn_A, kGamepadBtn_Y, kGamepadBtn_X, kGamepadBtn_L1, kGamepadBtn_R1,
 };
 
 /*
- * ParseGamepadArray — Parses a comma-separated list of gamepad binding
- * strings from the INI file. Supports modifier combos using "+" syntax,
- * e.g., "L1+A" means "press A while holding L1".
- *
- * The parser reads button names left-to-right; all buttons before the
- * final one become modifiers (their bit set in the modifiers bitmask),
- * and the last button is the trigger that fires the command.
+ * ParseGamepadBinding — Parses one gamepad binding string. Supports modifier
+ * combos using "+" syntax, e.g., "L1+A" means "press A while holding L1".
+ */
+static bool ParseGamepadBinding(const char *s, int cmd) {
+  uint32 modifiers = 0;
+  const char *ss = s;
+  for (;;) {
+    int button = ParseGamepadButtonName(&ss);
+    if (button == kGamepadBtn_Invalid)
+      return false;
+    while (*ss == ' ' || *ss == '\t') ss++;
+    if (*ss == '+') {
+      ss++;
+      modifiers |= 1 << button;
+    } else if (*ss == 0) {
+      GamepadMap_Add(button, modifiers, cmd);
+      return true;
+    } else {
+      return false;
+    }
+  }
+}
+
+/*
+ * ParseGamepadArray — Parses a comma-separated list of [GamepadMap] bindings.
+ * Gamepad button names keep their existing priority, while Key:/Keyboard:
+ * prefixes and non-button SDL names are routed into the keyboard hash table.
  */
 static void ParseGamepadArray(char *value, int cmd, int size) {
   char *s;
@@ -404,26 +441,11 @@ static void ParseGamepadArray(char *value, int cmd, int size) {
   for (; i < size && (s = NextDelim(&value, ',')) != NULL; i++, cmd += (cmd != 0)) {
     if (*s == 0)
       continue;
-    uint32 modifiers = 0;
-    const char *ss = s;
-    for (;;) {
-      int button = ParseGamepadButtonName(&ss);
-      if (button == kGamepadBtn_Invalid) BAD: {
-        fprintf(stderr, "Unknown gamepad button: '%s'\n", s);
-        break;
-      }
-      while (*ss == ' ' || *ss == '\t') ss++;
-      if (*ss == '+') {
-        // This button is a modifier — set its bit and continue parsing
-        ss++;
-        modifiers |= 1 << button;
-      } else if (*ss == 0) {
-        // End of string — this button is the trigger, register the binding
-        GamepadMap_Add(button, modifiers, cmd);
-        break;
-      } else
-        goto BAD;
-    }
+    if (ParseGamepadBinding(s, cmd))
+      continue;
+    if (ParseKeyBinding(s, cmd))
+      continue;
+    fprintf(stderr, "Unknown gamepad button or key: '%s'\n", s);
   }
 }
 

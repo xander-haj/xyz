@@ -1352,6 +1352,15 @@ static float ApproximateAtan2(float y, float x) {
  *   value      - axis value in SDL's signed 16-bit range.
  */
 static void HandleGamepadAxisInput(int gamepad_id, int axis, int value) {
+  if ((axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT)) {
+    if (value < 12000 || value >= 16000) {  // hysteresis
+      int button = axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT ? kGamepadBtn_L2 : kGamepadBtn_R2;
+      if (!(value >= 12000 && Hud_NewSettingsMenu_CaptureGamepadButton(button)))
+        HandleGamepadInput(button, value >= 12000);
+    }
+    return;
+  }
+
   if (Hud_NewSettingsMenu_BlocksGamepadInput())
     return;
   static int last_gamepad_id, last_x, last_y;
@@ -1392,12 +1401,6 @@ static void HandleGamepadAxisInput(int gamepad_id, int axis, int value) {
       buttons = kSegmentToButtons[(uint8)(angle + 16 + 64) >> 5];
     }
     g_gamepad_buttons = buttons;
-  } else if ((axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT)) {
-    if (value < 12000 || value >= 16000) {  // hysteresis
-      int button = axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT ? kGamepadBtn_L2 : kGamepadBtn_R2;
-      if (!(value >= 12000 && Hud_NewSettingsMenu_CaptureGamepadButton(button)))
-        HandleGamepadInput(button, value >= 12000);
-    }
   }
 }
 

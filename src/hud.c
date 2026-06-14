@@ -1960,6 +1960,12 @@ static void NewSettings_DrawPlaceholder(const char *title) {
 }
 
 static void NewSettings_FormatBindingForDisplay(char *dst, size_t dst_size, const char *src) {
+  const char *key_prefix = StringStartsWithNoCase(src, "Key:");
+  if (!key_prefix)
+    key_prefix = StringStartsWithNoCase(src, "Keyboard:");
+  if (key_prefix)
+    src = key_prefix;
+
   size_t j = 0;
   for (size_t i = 0; src[i] && j + 1 < dst_size; i++) {
     char c = src[i];
@@ -1973,10 +1979,12 @@ static void NewSettings_FormatBindingForDisplay(char *dst, size_t dst_size, cons
   dst[j] = 0;
 }
 
-static void NewSettings_DrawInputBindings(const char *title, char values[kNewSettingsInputBindingCount][kNewSettingsInputValueLen],
-                                          bool keyboard) {
+static void NewSettings_DrawInputBindings(
+    const char *title,
+    char values[kNewSettingsInputBindingCount][kNewSettingsInputValueLen],
+    bool keyboard) {
   NewSettings_DrawShell(title);
-  NewSettings_DrawText(uvram_screen.row[0].col, 16, 6, keyboard ? "RIGHT THEN TYPE" : "A THEN BUTTON");
+  NewSettings_DrawText(uvram_screen.row[0].col, 16, 6, keyboard ? "RIGHT THEN TYPE" : "A THEN INPUT");
   NewSettings_DrawRow(uvram_screen.row[0].col, 0, g_new_settings_cursor == 0, "BACK", NULL);
   int first_screen_row = 1;
   int selected = g_new_settings_cursor == 0 ? 0 : g_new_settings_cursor - 1;
@@ -1995,13 +2003,19 @@ static void NewSettings_DrawInputBindings(const char *title, char values[kNewSet
       selected_row = g_new_settings_cursor == index + 2;
     char value[32];
     NewSettings_FormatBindingForDisplay(value, sizeof(value), values[index][0] ? values[index] : "NONE");
-    NewSettings_DrawText(uvram_screen.row[0].col, 3, 8 + screen_row * 2, selected_row && g_new_settings_hud_column == 0 ? ">" : " ");
+    NewSettings_DrawText(
+        uvram_screen.row[0].col, 3, 8 + screen_row * 2,
+        selected_row && g_new_settings_hud_column == 0 ? ">" : " ");
     NewSettings_DrawTextClipped(uvram_screen.row[0].col, 5, 8 + screen_row * 2, kNewSettingsInputLabels[index], 12);
     NewSettings_DrawText(uvram_screen.row[0].col, 13, 8 + screen_row * 2, ":");
-    NewSettings_DrawText(uvram_screen.row[0].col, 15, 8 + screen_row * 2, selected_row && g_new_settings_hud_column == 1 ? ">" : " ");
+    NewSettings_DrawText(
+        uvram_screen.row[0].col, 15, 8 + screen_row * 2,
+        selected_row && g_new_settings_hud_column == 1 ? ">" : " ");
+    const char *display_value = value;
+    if (selected_row && g_new_settings_hud_column == 1)
+      display_value = keyboard ? "TYPE KEY" : "PRESS KEY/BTN";
     NewSettings_DrawTextClipped(uvram_screen.row[0].col, 17, 8 + screen_row * 2,
-                                selected_row && g_new_settings_hud_column == 1 ? (keyboard ? "TYPE KEY" : "PRESS BTN") : value,
-                                30);
+                                display_value, 30);
   }
 }
 
@@ -2336,6 +2350,10 @@ static const char *NewSettings_GamepadButtonName(int button) {
   }
 }
 
+static void NewSettings_CopyGamepadKeyboardBinding(char dst[kNewSettingsInputValueLen], const char *key_name) {
+  snprintf(dst, kNewSettingsInputValueLen, "Key:%s", key_name);
+}
+
 bool Hud_NewSettingsMenu_CaptureKey(const char *key_name) {
   if (!(main_module_index == 14 && submodule_index == 12 && overworld_map_state == 3))
     return false;
@@ -2359,14 +2377,22 @@ bool Hud_NewSettingsMenu_CaptureKey(const char *key_name) {
     g_new_settings_dirty = 1;
     return true;
   }
+  if (g_new_settings_page == kNewSettingsPage_Gamepad) {
+    if (g_new_settings_cursor == 0 || g_new_settings_hud_column != 1)
+      return false;
+    int index = g_new_settings_cursor - 1;
+    NewSettings_CopyGamepadKeyboardBinding(g_new_settings_gamepad_values[index], key_name);
+    NewSettings_WriteInputBindings("GamepadMap", g_new_settings_gamepad_values);
+    g_new_settings_hud_column = 0;
+    g_new_settings_dirty = 1;
+    return true;
+  }
   return false;
 }
 
 bool Hud_NewSettingsMenu_CaptureGamepadButton(int button) {
   if (!(main_module_index == 14 && submodule_index == 12 && overworld_map_state == 3))
     return false;
-  if (g_new_settings_page == kNewSettingsPage_Keymap || g_new_settings_page == kNewSettingsPage_KeymapCheats)
-    return true;
   if (g_new_settings_page != kNewSettingsPage_Gamepad || g_new_settings_cursor == 0 || g_new_settings_hud_column != 1)
     return false;
   const char *name = NewSettings_GamepadButtonName(button);
@@ -2382,9 +2408,7 @@ bool Hud_NewSettingsMenu_CaptureGamepadButton(int button) {
 
 bool Hud_NewSettingsMenu_BlocksGamepadInput() {
   return main_module_index == 14 && submodule_index == 12 && overworld_map_state == 3 &&
-         (g_new_settings_page == kNewSettingsPage_Keymap ||
-          g_new_settings_page == kNewSettingsPage_KeymapCheats ||
-          (g_new_settings_page == kNewSettingsPage_Gamepad && g_new_settings_hud_column == 1));
+         g_new_settings_page == kNewSettingsPage_Gamepad && g_new_settings_hud_column == 1;
 }
 
 bool Hud_NewSettingsMenuWantsHudPreview() {
