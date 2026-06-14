@@ -578,7 +578,8 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
       Zelda_ShouldRenderWideHudOverlay();
 
   bool anchor_wide_hud_bg3 = Zelda_ShouldAnchorBg3ToViewport();
-  PpuSetRenderWideHud(g_zenv.ppu, render_wide_hud, anchor_wide_hud_bg3, Hud_GetWideHudTilemap(),
+  PpuSetRenderWideHud(g_zenv.ppu, render_wide_hud, anchor_wide_hud_bg3,
+                      Hud_GetWideHudTilemap(), Hud_GetWideHudTileOffsets(),
                       render_wide_hud ? g_config.hud_shadow_size : 0);
   PpuBeginDrawing(g_zenv.ppu, pixel_buffer, pitch, render_flags);
 

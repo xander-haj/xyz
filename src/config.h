@@ -112,50 +112,50 @@ typedef struct Config {
   bool fill_extended_aspect_ratio_borders; // Fill outdoor/dungeon widescreen side padding from edge art
   bool no_sprite_limits;           // Remove the SNES 32-sprite-per-scanline limit
   bool display_perf_title;         // Show FPS/performance stats in window title
-  int16 hud_magic_frame_pos_x;     // Widescreen HUD magic-frame X tile
-  int16 hud_magic_frame_pos_y;     // Widescreen HUD magic-frame Y tile
-  int16 hud_magic_meter_pos_x;     // Widescreen HUD magic-fill X tile
-  int16 hud_magic_meter_pos_y;     // Widescreen HUD magic-fill Y tile
-  int16 hud_item_box_pos_x;        // Widescreen HUD item-frame X tile
-  int16 hud_item_box_pos_y;        // Widescreen HUD item-frame Y tile
-  int16 hud_item_icon_pos_x;       // Widescreen HUD item-icon X tile
-  int16 hud_item_icon_pos_y;       // Widescreen HUD item-icon Y tile
-  int16 hud_item_x_box_pos_x;      // Widescreen HUD X item-frame X tile
-  int16 hud_item_x_box_pos_y;      // Widescreen HUD X item-frame Y tile
-  int16 hud_item_x_icon_pos_x;     // Widescreen HUD X item-icon X tile
-  int16 hud_item_x_icon_pos_y;     // Widescreen HUD X item-icon Y tile
-  int16 hud_item_l_box_pos_x;      // Widescreen HUD L item-frame X tile
-  int16 hud_item_l_box_pos_y;      // Widescreen HUD L item-frame Y tile
-  int16 hud_item_l_icon_pos_x;     // Widescreen HUD L item-icon X tile
-  int16 hud_item_l_icon_pos_y;     // Widescreen HUD L item-icon Y tile
-  int16 hud_item_r_box_pos_x;      // Widescreen HUD R item-frame X tile
-  int16 hud_item_r_box_pos_y;      // Widescreen HUD R item-frame Y tile
-  int16 hud_item_r_icon_pos_x;     // Widescreen HUD R item-icon X tile
-  int16 hud_item_r_icon_pos_y;     // Widescreen HUD R item-icon Y tile
-  int16 hud_rupees_bg_pos_x;       // Widescreen HUD rupee-backdrop X tile
-  int16 hud_rupees_bg_pos_y;       // Widescreen HUD rupee-backdrop Y tile
-  int16 hud_rupees_pos_x;          // Widescreen HUD rupee digits X tile
-  int16 hud_rupees_pos_y;          // Widescreen HUD rupee digits Y tile
-  int16 hud_bombs_bg_pos_x;        // Widescreen HUD bomb-backdrop X tile
-  int16 hud_bombs_bg_pos_y;        // Widescreen HUD bomb-backdrop Y tile
-  int16 hud_bombs_pos_x;           // Widescreen HUD bomb digits X tile
-  int16 hud_bombs_pos_y;           // Widescreen HUD bomb digits Y tile
-  int16 hud_arrows_bg_pos_x;       // Widescreen HUD arrow-backdrop X tile
-  int16 hud_arrows_bg_pos_y;       // Widescreen HUD arrow-backdrop Y tile
-  int16 hud_arrow_upgrade_bg_pos_x;// Widescreen HUD silver-arrow backdrop X tile
-  int16 hud_arrow_upgrade_bg_pos_y;// Widescreen HUD silver-arrow backdrop Y tile
-  int16 hud_arrows_pos_x;          // Widescreen HUD arrow digits X tile
-  int16 hud_arrows_pos_y;          // Widescreen HUD arrow digits Y tile
-  int16 hud_keys_bg_pos_x;         // Widescreen HUD key-backdrop X tile
-  int16 hud_keys_bg_pos_y;         // Widescreen HUD key-backdrop Y tile
-  int16 hud_keys_pos_x;            // Widescreen HUD key digit X tile
-  int16 hud_keys_pos_y;            // Widescreen HUD key digit Y tile
-  int16 hud_floor_indicator_pos_x; // Widescreen HUD floor-indicator X tile
-  int16 hud_floor_indicator_pos_y; // Widescreen HUD floor-indicator Y tile
-  int16 hud_hearts_frame_pos_x;    // Widescreen HUD heart-frame X tile
-  int16 hud_hearts_frame_pos_y;    // Widescreen HUD heart-frame Y tile
-  int16 hud_hearts_pos_x;          // Widescreen HUD heart icons X tile
-  int16 hud_hearts_pos_y;          // Widescreen HUD heart icons Y tile
+  int16 hud_magic_frame_pos_x;     // Widescreen HUD magic-frame X half-tile
+  int16 hud_magic_frame_pos_y;     // Widescreen HUD magic-frame Y half-tile
+  int16 hud_magic_meter_pos_x;     // Widescreen HUD magic-fill X half-tile
+  int16 hud_magic_meter_pos_y;     // Widescreen HUD magic-fill Y half-tile
+  int16 hud_item_box_pos_x;        // Widescreen HUD item-frame X half-tile
+  int16 hud_item_box_pos_y;        // Widescreen HUD item-frame Y half-tile
+  int16 hud_item_icon_pos_x;       // Widescreen HUD item-icon X half-tile
+  int16 hud_item_icon_pos_y;       // Widescreen HUD item-icon Y half-tile
+  int16 hud_item_x_box_pos_x;      // Widescreen HUD X item-frame X half-tile
+  int16 hud_item_x_box_pos_y;      // Widescreen HUD X item-frame Y half-tile
+  int16 hud_item_x_icon_pos_x;     // Widescreen HUD X item-icon X half-tile
+  int16 hud_item_x_icon_pos_y;     // Widescreen HUD X item-icon Y half-tile
+  int16 hud_item_l_box_pos_x;      // Widescreen HUD L item-frame X half-tile
+  int16 hud_item_l_box_pos_y;      // Widescreen HUD L item-frame Y half-tile
+  int16 hud_item_l_icon_pos_x;     // Widescreen HUD L item-icon X half-tile
+  int16 hud_item_l_icon_pos_y;     // Widescreen HUD L item-icon Y half-tile
+  int16 hud_item_r_box_pos_x;      // Widescreen HUD R item-frame X half-tile
+  int16 hud_item_r_box_pos_y;      // Widescreen HUD R item-frame Y half-tile
+  int16 hud_item_r_icon_pos_x;     // Widescreen HUD R item-icon X half-tile
+  int16 hud_item_r_icon_pos_y;     // Widescreen HUD R item-icon Y half-tile
+  int16 hud_rupees_bg_pos_x;       // Widescreen HUD rupee-backdrop X half-tile
+  int16 hud_rupees_bg_pos_y;       // Widescreen HUD rupee-backdrop Y half-tile
+  int16 hud_rupees_pos_x;          // Widescreen HUD rupee digits X half-tile
+  int16 hud_rupees_pos_y;          // Widescreen HUD rupee digits Y half-tile
+  int16 hud_bombs_bg_pos_x;        // Widescreen HUD bomb-backdrop X half-tile
+  int16 hud_bombs_bg_pos_y;        // Widescreen HUD bomb-backdrop Y half-tile
+  int16 hud_bombs_pos_x;           // Widescreen HUD bomb digits X half-tile
+  int16 hud_bombs_pos_y;           // Widescreen HUD bomb digits Y half-tile
+  int16 hud_arrows_bg_pos_x;       // Widescreen HUD arrow-backdrop X half-tile
+  int16 hud_arrows_bg_pos_y;       // Widescreen HUD arrow-backdrop Y half-tile
+  int16 hud_arrow_upgrade_bg_pos_x;// Widescreen HUD silver-arrow backdrop X half-tile
+  int16 hud_arrow_upgrade_bg_pos_y;// Widescreen HUD silver-arrow backdrop Y half-tile
+  int16 hud_arrows_pos_x;          // Widescreen HUD arrow digits X half-tile
+  int16 hud_arrows_pos_y;          // Widescreen HUD arrow digits Y half-tile
+  int16 hud_keys_bg_pos_x;         // Widescreen HUD key-backdrop X half-tile
+  int16 hud_keys_bg_pos_y;         // Widescreen HUD key-backdrop Y half-tile
+  int16 hud_keys_pos_x;            // Widescreen HUD key digit X half-tile
+  int16 hud_keys_pos_y;            // Widescreen HUD key digit Y half-tile
+  int16 hud_floor_indicator_pos_x; // Widescreen HUD floor-indicator X half-tile
+  int16 hud_floor_indicator_pos_y; // Widescreen HUD floor-indicator Y half-tile
+  int16 hud_hearts_frame_pos_x;    // Widescreen HUD heart-frame X half-tile
+  int16 hud_hearts_frame_pos_y;    // Widescreen HUD heart-frame Y half-tile
+  int16 hud_hearts_pos_x;          // Widescreen HUD heart icons X half-tile
+  int16 hud_hearts_pos_y;          // Widescreen HUD heart icons Y half-tile
   uint8 hud_shadow_size;           // Rearranged HUD bottom/right shadow size in pixels
   // --- MSU-1 Audio Settings (CD-quality music replacement) ---
   uint8 enable_msu;                // Bitmask of kMsuEnabled_* flags

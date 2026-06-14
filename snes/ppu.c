@@ -1354,25 +1354,33 @@ static void PpuFillMissingWidescreenBorders(Ppu *ppu, uint32 *dst, uint y) {
       dst, full_width, missing_left, missing_right, drawn_left, drawn_right, 16);
 }
 
-void PpuSetRenderWideHud(Ppu *ppu, bool enabled, bool anchor_bg3, const uint16_t *tilemap, uint8_t shadow_size) {
+void PpuSetRenderWideHud(Ppu *ppu, bool enabled, bool anchor_bg3, const uint16_t *tilemap,
+                         const uint8_t *tile_offsets, uint8_t shadow_size) {
   ppu->renderWideHud = enabled;
   ppu->anchorWideHudBg3 = anchor_bg3;
   ppu->wideHudTilemap = tilemap;
+  ppu->wideHudTileOffsets = tile_offsets;
   ppu->wideHudShadowSize = shadow_size;
 }
 
-static int PpuGetWideHudPixel(Ppu *ppu, uint bg_x, uint bg_y) {
+static int PpuGetWideHudPixel(Ppu *ppu, uint bg_x, uint bg_y, uint32 *tile_out) {
   if (bg_y >= 240 || bg_x >= 512)
     return 0;
   BgLayer *bglayer = &ppu->bgLayer[2];
-  uint32 tile = ppu->wideHudTilemap[UintMin(bg_y >> 3, 29) * 64 + ((bg_x >> 3) & 63)];
+  uint half_cell = UintMin(bg_y >> 2, 59) * 128 + ((bg_x >> 2) & 127);
+  uint32 tile = ppu->wideHudTilemap[half_cell];
   if ((tile & 0x3ff) == 0x7f)
     return 0;
-  int tileadr0 = bglayer->tileAdr + (bg_y & 7);
-  int tileadr1 = bglayer->tileAdr + 7 - (bg_y & 7);
+  uint8 offset = ppu->wideHudTileOffsets ? ppu->wideHudTileOffsets[half_cell] : 0;
+  int local_x = (offset & 0xf) + (bg_x & 3);
+  int local_y = (offset >> 4) + (bg_y & 3);
+  int tileadr0 = bglayer->tileAdr + local_y;
+  int tileadr1 = bglayer->tileAdr + 7 - local_y;
   int tileadr = (tile & 0x8000) ? tileadr1 : tileadr0;
   uint32 bits = ppu->vram[(tileadr + (tile & 0x3ff) * 8) & 0x7fff];
-  int bit = bg_x & 7;
+  int bit = local_x & 7;
+  if (tile_out)
+    *tile_out = tile;
   return (tile & 0x4000) ?
       ((bits >> bit) & 1) | ((bits >> (7 + bit)) & 2) :
       ((bits >> (7 - bit)) & 1) | ((bits >> (14 - bit)) & 2);
@@ -1381,11 +1389,11 @@ static int PpuGetWideHudPixel(Ppu *ppu, uint bg_x, uint bg_y) {
 static bool PpuHasWideHudShadowSource(Ppu *ppu, uint bg_x, uint bg_y) {
   uint shadow_size = ppu->wideHudShadowSize;
   for (uint d = 1; d <= shadow_size; d++) {
-    if (bg_x >= d && PpuGetWideHudPixel(ppu, bg_x - d, bg_y))
+    if (bg_x >= d && PpuGetWideHudPixel(ppu, bg_x - d, bg_y, NULL))
       return true;
-    if (bg_y >= d && PpuGetWideHudPixel(ppu, bg_x, bg_y - d))
+    if (bg_y >= d && PpuGetWideHudPixel(ppu, bg_x, bg_y - d, NULL))
       return true;
-    if (bg_x >= d && bg_y >= d && PpuGetWideHudPixel(ppu, bg_x - d, bg_y - d))
+    if (bg_x >= d && bg_y >= d && PpuGetWideHudPixel(ppu, bg_x - d, bg_y - d, NULL))
       return true;
   }
   return false;
@@ -1403,25 +1411,15 @@ static void PpuDrawWideHudOverlay(Ppu *ppu, uint y, uint32 *dst_org) {
   if (target_extra == 0)
     return;
 
-  BgLayer *bglayer = &ppu->bgLayer[2];
   uint bg_y = y - 1;
-  int tileadr0 = bglayer->tileAdr + (bg_y & 7);
-  int tileadr1 = bglayer->tileAdr + 7 - (bg_y & 7);
   int width = 256 + target_extra * 2;
   int output_x = ppu->viewportLeftCur;
   uint32 *dst = dst_org + output_x;
 
   for (int out_x = 0; out_x < width; out_x++) {
     uint bg_x = out_x;
-    uint32 tile = ppu->wideHudTilemap[UintMin(bg_y >> 3, 29) * 64 + ((bg_x >> 3) & 63)];
-    if ((tile & 0x3ff) == 0x7f)
-      continue;
-    int tileadr = (tile & 0x8000) ? tileadr1 : tileadr0;
-    uint32 bits = ppu->vram[(tileadr + (tile & 0x3ff) * 8) & 0x7fff];
-    int bit = bg_x & 7;
-    int pixel = (tile & 0x4000) ?
-        ((bits >> bit) & 1) | ((bits >> (7 + bit)) & 2) :
-        ((bits >> (7 - bit)) & 1) | ((bits >> (14 - bit)) & 2);
+    uint32 tile = 0;
+    int pixel = PpuGetWideHudPixel(ppu, bg_x, bg_y, &tile);
 
     if (pixel) {
       pixel += (tile & 0x1c00) >> 8;

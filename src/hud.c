@@ -79,6 +79,7 @@ static void Hud_ReorderItem(int direction);
 static void Hud_Update_Magic();
 static void Hud_Update_Inventory();
 static void Hud_Update_Hearts();
+static void NewSettings_ClearHudEdit();
 
 /*
  * Capacity tables indexed by upgrade level.
@@ -94,12 +95,26 @@ static const uint8 kMaxHealthForLevel[] = { 9, 9, 9, 9, 9, 9, 9, 9, 17, 17, 17, 
 /* Convert (x, y) tile coordinates to a linear offset in the 32-wide BG3
  * tilemap. The SNES BG3 tilemap is 32 tiles wide, so each row is 32 words. */
 #define HUDXY(x, y) ((x) + (y) * 32)
-#define HUDWIDEXY(x, y) ((x) + (y) * 64)
 
-static uint16 g_wide_hud_tilemap[64 * 30];
+enum {
+  kHudHalfTile = 2,
+  kWideHudTilesX = 64,
+  kWideHudTilesY = 30,
+  kWideHudHalfWidth = kWideHudTilesX * kHudHalfTile,
+  kWideHudHalfHeight = kWideHudTilesY * kHudHalfTile,
+};
+
+#define HUDWIDEHALFXY(x, y) ((x) + (y) * kWideHudHalfWidth)
+
+static uint16 g_wide_hud_tilemap[kWideHudHalfWidth * kWideHudHalfHeight];
+static uint8 g_wide_hud_tile_offsets[kWideHudHalfWidth * kWideHudHalfHeight];
 
 const uint16 *Hud_GetWideHudTilemap() {
   return g_wide_hud_tilemap;
+}
+
+const uint8 *Hud_GetWideHudTileOffsets() {
+  return g_wide_hud_tile_offsets;
 }
 
 static bool Hud_RearrangeEnabled() {
@@ -108,25 +123,27 @@ static bool Hud_RearrangeEnabled() {
       g_config.extended_aspect_ratio != 0;
 }
 
-static int Hud_WideVisibleXToBg3Column(int x) {
-  return x < 0 ? 0 : x > 63 ? 63 : x;
+static int Hud_TileOffset(int tiles) {
+  return Hud_RearrangeEnabled() ? tiles * kHudHalfTile : tiles;
+}
+
+static int Hud_ClampHudX(int x) {
+  int max_x = Hud_RearrangeEnabled() ? kWideHudHalfWidth - kHudHalfTile : kWideHudTilesX - 1;
+  return x < 0 ? 0 : x > max_x ? max_x : x;
 }
 
 static int Hud_ClampHudY(int y) {
-  return y < 0 ? 0 : y > 29 ? 29 : y;
+  int max_y = Hud_RearrangeEnabled() ? kWideHudHalfHeight - kHudHalfTile : kWideHudTilesY - 1;
+  return y < 0 ? 0 : y > max_y ? max_y : y;
 }
 
 static int Hud_ClampHudBlockY(int y, int h) {
-  int max_y = IntMax(0, 30 - h);
+  int max_y = IntMax(0, (kWideHudTilesY - h) * Hud_TileOffset(1));
   return y < 0 ? 0 : y > max_y ? max_y : y;
 }
 
 static int Hud_GroupX(int default_x, int configured_x) {
   return Hud_RearrangeEnabled() ? configured_x : default_x;
-}
-
-static int Hud_GroupY(int default_y, int configured_y) {
-  return Hud_RearrangeEnabled() ? Hud_ClampHudY(configured_y) : default_y;
 }
 
 static bool Hud_ItemSwitchHudEnabled() {
@@ -202,23 +219,35 @@ static void Hud_UploadItemBoxLabelTiles() {
 
 static uint16 *Hud_TopHudTilePtr(int x, int y) {
   if (Hud_RearrangeEnabled())
-    return &g_wide_hud_tilemap[HUDWIDEXY(Hud_WideVisibleXToBg3Column(x), y)];
+    return &g_wide_hud_tilemap[HUDWIDEHALFXY(Hud_ClampHudX(x), Hud_ClampHudY(y))];
   return &hud_tile_indices_buffer[HUDXY(x, y)];
 }
 
 static void Hud_SetTopHudTile(int x, int y, uint16 tile) {
   if (Hud_RearrangeEnabled()) {
-    if ((uint)x < 64 && (uint)y < 30)
-      g_wide_hud_tilemap[HUDWIDEXY(x, y)] = tile;
+    for (int dy = 0; dy < kHudHalfTile; dy++) {
+      int cell_y = y + dy;
+      if ((uint)cell_y >= kWideHudHalfHeight)
+        continue;
+      for (int dx = 0; dx < kHudHalfTile; dx++) {
+        int cell_x = x + dx;
+        if ((uint)cell_x >= kWideHudHalfWidth)
+          continue;
+        int index = HUDWIDEHALFXY(cell_x, cell_y);
+        g_wide_hud_tilemap[index] = tile;
+        g_wide_hud_tile_offsets[index] = (dx * 4) | ((dy * 4) << 4);
+      }
+    }
   } else if ((uint)x < 32 && (uint)y < 6) {
     *Hud_TopHudTilePtr(x, y) = tile;
   }
 }
 
 static void Hud_DrawTopHudBlock(int x, int y, const uint16 *src, int w, int h, int src_stride) {
+  int step = Hud_TileOffset(1);
   for (int row = 0; row < h; row++) {
     for (int col = 0; col < w; col++)
-      Hud_SetTopHudTile(x + col, y + row, src[row * src_stride + col]);
+      Hud_SetTopHudTile(x + col * step, y + row * step, src[row * src_stride + col]);
   }
 }
 
@@ -507,8 +536,8 @@ static const uint16 kDungFloorIndicator_Gfx1[11] = { 0x2518, 0x2519, 0xa509, 0x2
 static void Hud_SetLegacyIndicatorTile(int legacy_index, uint16 tile) {
   if (Hud_RearrangeEnabled()) {
     int local = legacy_index - 0xf2 / 2;
-    int x = g_config.hud_floor_indicator_pos_x + (local & 31);
-    int y = Hud_ClampHudBlockY(g_config.hud_floor_indicator_pos_y, 2) + (local >> 5);
+    int x = g_config.hud_floor_indicator_pos_x + Hud_TileOffset(local & 31);
+    int y = Hud_ClampHudBlockY(g_config.hud_floor_indicator_pos_y, 2) + Hud_TileOffset(local >> 5);
     Hud_SetTopHudTile(x, y, tile);
   } else {
     hud_tile_indices_buffer[legacy_index] = tile;
@@ -1282,6 +1311,7 @@ static void Hud_NewSettingsMenu_QueueUpload() {
 }
 
 static void Hud_NewSettingsMenu_FinishClose() {
+  NewSettings_ClearHudEdit();
   Hud_Rebuild();
   overworld_map_state = 0;
   submodule_index = 0;
@@ -1322,6 +1352,12 @@ enum {
   kNewSettingsInputBindingCount = 13,
   kNewSettingsCheatBindingCount = 13,
   kNewSettingsInputValueLen = 32,
+  kNewSettingsHudEditValueLen = 12,
+  kNewSettingsMinusTile = 0x12,
+  kNewSettingsDotTile = 0x13,
+  kNewSettingsColonTile = 0x14,
+  kNewSettingsDigitTile = 0x15,
+  kNewSettingsCursorTile = 0x1f,
 };
 
 static NewSettingsPage g_new_settings_page;
@@ -1334,6 +1370,10 @@ static bool g_new_settings_extend_y;
 static bool g_new_settings_aspect_dirty;
 static uint8 g_new_settings_save_slot = 1;
 static uint8 g_new_settings_load_slot = 1;
+static bool g_new_settings_hud_edit_active;
+static uint8 g_new_settings_hud_edit_cursor;
+static uint8 g_new_settings_hud_edit_column;
+static char g_new_settings_hud_edit_value[kNewSettingsHudEditValueLen];
 static char g_new_settings_keymap_values[kNewSettingsInputBindingCount][kNewSettingsInputValueLen];
 static char g_new_settings_gamepad_values[kNewSettingsInputBindingCount][kNewSettingsInputValueLen];
 static char g_new_settings_cheat_values[kNewSettingsCheatBindingCount][kNewSettingsInputValueLen];
@@ -1411,6 +1451,68 @@ static NewSettingsHudRow kNewSettingsHudRows[] = {
   { "HEART FRAME", "HUDHeartsFramePosition", &g_config.hud_hearts_frame_pos_x, &g_config.hud_hearts_frame_pos_y, 12, 5 },
   { "HEART METER", "HUDHeartMeterPosition", &g_config.hud_hearts_pos_x, &g_config.hud_hearts_pos_y, 10, 2 },
 };
+
+static int NewSettings_HudAxisMax(const NewSettingsHudRow *item, int column) {
+  return ((column == 1 ? kWideHudTilesX - item->w : kWideHudTilesY - item->h) * kHudHalfTile);
+}
+
+static int NewSettings_ClampHudValue(const NewSettingsHudRow *item, int column, int value) {
+  return IntMax(0, IntMin(NewSettings_HudAxisMax(item, column), value));
+}
+
+static void NewSettings_FormatHudValue(char *dst, size_t dst_size, int value) {
+  int abs_value = value < 0 ? -value : value;
+  const char *sign = value < 0 ? "-" : "";
+  if (abs_value & 1)
+    snprintf(dst, dst_size, "%s%d.5", sign, abs_value / kHudHalfTile);
+  else
+    snprintf(dst, dst_size, "%s%d", sign, abs_value / kHudHalfTile);
+}
+
+static bool NewSettings_ParseHudValue(const char *value, int *result, bool allow_partial) {
+  while (*value == ' ' || *value == '\t')
+    value++;
+  if (*value < '0' || *value > '9')
+    return false;
+
+  char *end;
+  long whole = strtol(value, &end, 10);
+  long units = whole * kHudHalfTile;
+  if (*end == '.') {
+    end++;
+    if (*end == 0 && allow_partial) {
+      // Treat a live edit like "38." as 38 until the fractional digit arrives.
+    } else if (*end == '5') {
+      units++;
+      end++;
+    } else if (*end == '0') {
+      end++;
+    } else {
+      return false;
+    }
+    while (*end == '0')
+      end++;
+  }
+  while (*end == ' ' || *end == '\t')
+    end++;
+  if (*end != 0 || units < 0 || units > INT16_MAX)
+    return false;
+  *result = (int)units;
+  return true;
+}
+
+static bool NewSettings_HudEditMatches(int cursor, int column) {
+  return g_new_settings_hud_edit_active &&
+         g_new_settings_hud_edit_cursor == cursor &&
+         g_new_settings_hud_edit_column == column;
+}
+
+static void NewSettings_ClearHudEdit() {
+  g_new_settings_hud_edit_active = false;
+  g_new_settings_hud_edit_cursor = 0;
+  g_new_settings_hud_edit_column = 0;
+  g_new_settings_hud_edit_value[0] = 0;
+}
 
 static char *NewSettings_Trim(char *s) {
   while (*s == ' ' || *s == '\t')
@@ -1590,8 +1692,10 @@ static void NewSettings_WriteInt(const char *section, const char *key, int value
 }
 
 static void NewSettings_WritePosition(const char *key, int x, int y) {
-  char tmp[32];
-  snprintf(tmp, sizeof(tmp), "%d,%d", x, y);
+  char tmp[40], x_value[16], y_value[16];
+  NewSettings_FormatHudValue(x_value, sizeof(x_value), x);
+  NewSettings_FormatHudValue(y_value, sizeof(y_value), y);
+  snprintf(tmp, sizeof(tmp), "%s,%s", x_value, y_value);
   NewSettings_WriteIniValue("Features", key, tmp);
 }
 
@@ -1657,13 +1761,30 @@ static void NewSettings_ToggleFeature(const NewSettingsFeatureRow *row) {
 
 static void NewSettings_UploadValueGlyphTiles() {
 #define PV(a0,a1,a2,a3,a4,a5,a6,a7)  ((a0 & 1) << 7 | (a0 >> 1 & 1) << 15 | (a1 & 1) << 6 | (a1 >> 1 & 1) << 14 | (a2 & 1) <<5 | (a2 >> 1&1) <<13 | (a3 & 1) << 4 | (a3>> 1 & 1) << 12 | (a4 & 1) << 3 | (a4 >> 1 & 1) << 11 | (a5 & 1) << 2 | (a5 >> 1 & 1) << 10 | (a6 & 1) << 1 | (a6 >> 1 & 1) << 9 | (a7 & 1) << 0 | (a7 >> 1 & 1) << 8)
-  enum {
-    kNewSettingsColonTile = 0x14,
-    kNewSettingsDigitTile = 0x15,
-    kNewSettingsCursorTile = 0x1f,
-  };
 #define B 3
 #define W 2
+  static const uint16 kExtraValueTiles[2][8] = {
+    {
+      PV(B,B,B,B,B,B,B,B),
+      PV(B,B,B,B,B,B,B,B),
+      PV(B,B,B,B,B,B,B,B),
+      PV(B,B,W,W,W,W,B,B),
+      PV(B,B,W,W,W,W,B,B),
+      PV(B,B,B,B,B,B,B,B),
+      PV(B,B,B,B,B,B,B,B),
+      PV(B,B,B,B,B,B,B,B),
+    },
+    {
+      PV(B,B,B,B,B,B,B,B),
+      PV(B,B,B,B,B,B,B,B),
+      PV(B,B,B,B,B,B,B,B),
+      PV(B,B,B,B,B,B,B,B),
+      PV(B,B,B,B,B,B,B,B),
+      PV(B,B,B,W,W,B,B,B),
+      PV(B,B,B,W,W,B,B,B),
+      PV(B,B,B,B,B,B,B,B),
+    },
+  };
   static const uint16 kValueTiles[11][8] = {
     {
       PV(B,B,B,B,B,B,B,B),
@@ -1776,6 +1897,8 @@ static void NewSettings_UploadValueGlyphTiles() {
       PV(B,B,B,B,B,B,B,B),
     },
   };
+  memcpy(&g_zenv.vram[0x7000 + kNewSettingsMinusTile * 8], kExtraValueTiles[0], sizeof(kExtraValueTiles[0]));
+  memcpy(&g_zenv.vram[0x7000 + kNewSettingsDotTile * 8], kExtraValueTiles[1], sizeof(kExtraValueTiles[1]));
   memcpy(&g_zenv.vram[0x7000 + kNewSettingsColonTile * 8], kValueTiles[0], sizeof(kValueTiles[0]));
   for (int i = 0; i < 10; i++)
     memcpy(&g_zenv.vram[0x7000 + (kNewSettingsDigitTile + i) * 8], kValueTiles[i + 1], sizeof(kValueTiles[i + 1]));
@@ -1806,6 +1929,10 @@ static void NewSettings_DrawChar(uint16 *dst, int x, int y, char c) {
     tile = 0x2550 + c - 'A';
   else if (c >= '0' && c <= '9')
     tile = 0x2400 | (0x15 + c - '0');
+  else if (c == '.')
+    tile = 0x2400 | kNewSettingsDotTile;
+  else if (c == '-')
+    tile = 0x2400 | kNewSettingsMinusTile;
   else if (c == ':')
     tile = 0x2400 | 0x14;
   else if (c == '<')
@@ -1945,11 +2072,18 @@ static void NewSettings_DrawHud() {
     NewSettingsHudRow *item = &kNewSettingsHudRows[first + row];
     int screen_row = row + 1;
     bool selected = g_new_settings_cursor == first + row + 1;
+    char x_value[16], y_value[16];
+    NewSettings_FormatHudValue(x_value, sizeof(x_value), *item->x);
+    NewSettings_FormatHudValue(y_value, sizeof(y_value), *item->y);
+    if (selected && NewSettings_HudEditMatches(g_new_settings_cursor, 1))
+      snprintf(x_value, sizeof(x_value), "%s", g_new_settings_hud_edit_value);
+    if (selected && NewSettings_HudEditMatches(g_new_settings_cursor, 2))
+      snprintf(y_value, sizeof(y_value), "%s", g_new_settings_hud_edit_value);
     NewSettings_DrawRow(uvram_screen.row[0].col, screen_row, selected && g_new_settings_hud_column == 0, item->label, NULL);
-    NewSettings_DrawText(uvram_screen.row[0].col, 21, 8 + screen_row * 2, selected && g_new_settings_hud_column == 1 ? ">" : " ");
-    NewSettings_DrawNumber(uvram_screen.row[0].col, 22, 8 + screen_row * 2, *item->x);
+    NewSettings_DrawText(uvram_screen.row[0].col, 19, 8 + screen_row * 2, selected && g_new_settings_hud_column == 1 ? ">" : " ");
+    NewSettings_DrawTextClipped(uvram_screen.row[0].col, 20, 8 + screen_row * 2, x_value, 24);
     NewSettings_DrawText(uvram_screen.row[0].col, 25, 8 + screen_row * 2, selected && g_new_settings_hud_column == 2 ? ">" : " ");
-    NewSettings_DrawNumber(uvram_screen.row[0].col, 26, 8 + screen_row * 2, *item->y);
+    NewSettings_DrawTextClipped(uvram_screen.row[0].col, 26, 8 + screen_row * 2, y_value, 30);
   }
 }
 
@@ -2059,6 +2193,7 @@ static int NewSettings_RowCount() {
 }
 
 static void NewSettings_Goto(NewSettingsPage page, NewSettingsPage back) {
+  NewSettings_ClearHudEdit();
   g_new_settings_page = page;
   g_new_settings_back_page = back;
   g_new_settings_cursor = 0;
@@ -2204,7 +2339,8 @@ static void NewSettings_HandleChange(int delta) {
       NewSettings_AdjustInt("Features", "HUDShadowSize", &g_config.hud_shadow_size, delta, 0, 16);
   } else if (g_new_settings_page == kNewSettingsPage_FeatureHud && g_new_settings_cursor != 0) {
     NewSettingsHudRow *item = &kNewSettingsHudRows[g_new_settings_cursor - 1];
-    *item->x = IntMax(0, IntMin(63, *item->x + delta));
+    NewSettings_ClearHudEdit();
+    *item->x = NewSettings_ClampHudValue(item, 1, *item->x + delta);
     NewSettings_WritePosition(item->ini_key, *item->x, *item->y);
     Hud_Rebuild();
   }
@@ -2215,10 +2351,11 @@ static void NewSettings_AdjustHudValue(int delta) {
   if (g_new_settings_page != kNewSettingsPage_FeatureHud || g_new_settings_cursor == 0)
     return;
   NewSettingsHudRow *item = &kNewSettingsHudRows[g_new_settings_cursor - 1];
+  NewSettings_ClearHudEdit();
   if (g_new_settings_hud_column == 1)
-    *item->x = IntMax(0, IntMin(64 - item->w, *item->x + delta));
+    *item->x = NewSettings_ClampHudValue(item, 1, *item->x + delta);
   else if (g_new_settings_hud_column == 2)
-    *item->y = IntMax(0, IntMin(30 - item->h, *item->y + delta));
+    *item->y = NewSettings_ClampHudValue(item, 2, *item->y + delta);
   else
     return;
   NewSettings_WritePosition(item->ini_key, *item->x, *item->y);
@@ -2262,6 +2399,7 @@ static void NewSettings_HandleInput() {
     else if (key_value_selected || cheat_value_selected || gamepad_value_selected)
       g_new_settings_dirty = 1;
     else {
+      NewSettings_ClearHudEdit();
       g_new_settings_cursor = (g_new_settings_cursor + rows - 1) % rows;
       g_new_settings_hud_column = 0;
       g_new_settings_dirty = 1;
@@ -2274,6 +2412,7 @@ static void NewSettings_HandleInput() {
     else if (key_value_selected || cheat_value_selected || gamepad_value_selected)
       g_new_settings_dirty = 1;
     else {
+      NewSettings_ClearHudEdit();
       g_new_settings_cursor = (g_new_settings_cursor + 1) % rows;
       g_new_settings_hud_column = 0;
       g_new_settings_dirty = 1;
@@ -2282,27 +2421,33 @@ static void NewSettings_HandleInput() {
 
   if (g_new_settings_page == kNewSettingsPage_Home && (g_new_settings_cursor == 6 || g_new_settings_cursor == 7)) {
     if (filtered_joypad_H & kJoypadH_Left) {
+      NewSettings_ClearHudEdit();
       g_new_settings_hud_column = 0;
       g_new_settings_dirty = 1;
     } else if (filtered_joypad_H & kJoypadH_Right) {
+      NewSettings_ClearHudEdit();
       g_new_settings_hud_column = 1;
       g_new_settings_dirty = 1;
     }
   } else if ((g_new_settings_page == kNewSettingsPage_Keymap || g_new_settings_page == kNewSettingsPage_KeymapCheats ||
        g_new_settings_page == kNewSettingsPage_Gamepad) && g_new_settings_cursor != 0) {
     if (filtered_joypad_H & kJoypadH_Left) {
+      NewSettings_ClearHudEdit();
       g_new_settings_hud_column = 0;
       g_new_settings_dirty = 1;
     } else if (filtered_joypad_H & kJoypadH_Right) {
+      NewSettings_ClearHudEdit();
       g_new_settings_hud_column = 1;
       g_new_settings_dirty = 1;
     }
   } else if (g_new_settings_page == kNewSettingsPage_FeatureHud && g_new_settings_cursor != 0) {
     if (filtered_joypad_H & kJoypadH_Left) {
+      NewSettings_ClearHudEdit();
       if (g_new_settings_hud_column != 0)
         g_new_settings_hud_column--;
       g_new_settings_dirty = 1;
     } else if (filtered_joypad_H & kJoypadH_Right) {
+      NewSettings_ClearHudEdit();
       if (g_new_settings_hud_column < 2)
         g_new_settings_hud_column++;
       g_new_settings_dirty = 1;
@@ -2317,7 +2462,8 @@ static void NewSettings_HandleInput() {
   if (filtered_joypad_L & kJoypadL_A)
     NewSettings_HandleActivate();
   if (filtered_joypad_H & kJoypadH_B) {
-    if (home_state_value_selected || key_value_selected || cheat_value_selected || gamepad_value_selected) {
+    if (home_state_value_selected || hud_value_selected || key_value_selected || cheat_value_selected || gamepad_value_selected) {
+      NewSettings_ClearHudEdit();
       g_new_settings_hud_column = 0;
       g_new_settings_dirty = 1;
     } else if (g_new_settings_page == kNewSettingsPage_Home)
@@ -2354,9 +2500,130 @@ static void NewSettings_CopyGamepadKeyboardBinding(char dst[kNewSettingsInputVal
   snprintf(dst, kNewSettingsInputValueLen, "Key:%s", key_name);
 }
 
+static const char *NewSettings_BaseKeyName(const char *key_name) {
+  const char *base = strrchr(key_name, '+');
+  return base ? base + 1 : key_name;
+}
+
+static bool NewSettings_HudInputCharForKey(const char *key_name, char *out) {
+  const char *base = NewSettings_BaseKeyName(key_name);
+  const char *keypad = StringStartsWithNoCase(base, "Keypad ");
+  if (keypad)
+    base = keypad;
+
+  if (base[0] >= '0' && base[0] <= '9' && base[1] == 0) {
+    *out = base[0];
+    return true;
+  }
+  if (StringEqualsNoCase(base, ".") ||
+      StringEqualsNoCase(base, "Period") ||
+      StringEqualsNoCase(base, "Decimal")) {
+    *out = '.';
+    return true;
+  }
+  return false;
+}
+
+static void NewSettings_BeginHudEdit(bool copy_current) {
+  NewSettingsHudRow *item = &kNewSettingsHudRows[g_new_settings_cursor - 1];
+  int value = g_new_settings_hud_column == 1 ? *item->x : *item->y;
+  g_new_settings_hud_edit_active = true;
+  g_new_settings_hud_edit_cursor = g_new_settings_cursor;
+  g_new_settings_hud_edit_column = g_new_settings_hud_column;
+  if (copy_current)
+    NewSettings_FormatHudValue(g_new_settings_hud_edit_value, sizeof(g_new_settings_hud_edit_value), value);
+  else
+    g_new_settings_hud_edit_value[0] = 0;
+}
+
+static void NewSettings_ApplyHudEditValue(bool allow_partial) {
+  NewSettingsHudRow *item = &kNewSettingsHudRows[g_new_settings_hud_edit_cursor - 1];
+  int column = g_new_settings_hud_edit_column;
+  int value;
+  if (!NewSettings_ParseHudValue(g_new_settings_hud_edit_value, &value, allow_partial))
+    return;
+  value = NewSettings_ClampHudValue(item, column, value);
+  if (column == 1)
+    *item->x = value;
+  else
+    *item->y = value;
+  NewSettings_WritePosition(item->ini_key, *item->x, *item->y);
+  Hud_Rebuild();
+}
+
+static bool NewSettings_AppendHudEditChar(char c) {
+  char *value = g_new_settings_hud_edit_value;
+  size_t len = strlen(value);
+  const char *dot = strchr(value, '.');
+  if (len + 1 >= sizeof(g_new_settings_hud_edit_value))
+    return false;
+  if (c == '.') {
+    if (dot)
+      return false;
+    if (len == 0) {
+      if (len + 2 >= sizeof(g_new_settings_hud_edit_value))
+        return false;
+      value[len++] = '0';
+    }
+  } else if (dot) {
+    size_t frac_len = strlen(dot + 1);
+    if ((frac_len == 0 && c != '0' && c != '5') ||
+        (frac_len != 0 && c != '0'))
+      return false;
+  }
+  value[len++] = c;
+  value[len] = 0;
+  return true;
+}
+
+static bool NewSettings_CaptureHudValueKey(const char *key_name) {
+  if (g_new_settings_page != kNewSettingsPage_FeatureHud ||
+      g_new_settings_cursor == 0 ||
+      (g_new_settings_hud_column != 1 && g_new_settings_hud_column != 2))
+    return false;
+
+  const char *base = NewSettings_BaseKeyName(key_name);
+  if (StringEqualsNoCase(base, "Escape")) {
+    NewSettings_ClearHudEdit();
+    g_new_settings_dirty = 1;
+    return true;
+  }
+  if (StringEqualsNoCase(base, "Return") ||
+      StringEqualsNoCase(base, "Enter") ||
+      StringEqualsNoCase(base, "Keypad Enter")) {
+    if (NewSettings_HudEditMatches(g_new_settings_cursor, g_new_settings_hud_column))
+      NewSettings_ApplyHudEditValue(true);
+    NewSettings_ClearHudEdit();
+    g_new_settings_dirty = 1;
+    return true;
+  }
+  if (StringEqualsNoCase(base, "Backspace")) {
+    if (!NewSettings_HudEditMatches(g_new_settings_cursor, g_new_settings_hud_column))
+      NewSettings_BeginHudEdit(true);
+    size_t len = strlen(g_new_settings_hud_edit_value);
+    if (len)
+      g_new_settings_hud_edit_value[len - 1] = 0;
+    NewSettings_ApplyHudEditValue(true);
+    g_new_settings_dirty = 1;
+    return true;
+  }
+
+  char c;
+  if (!NewSettings_HudInputCharForKey(key_name, &c))
+    return false;
+  if (!NewSettings_HudEditMatches(g_new_settings_cursor, g_new_settings_hud_column))
+    NewSettings_BeginHudEdit(false);
+  NewSettings_AppendHudEditChar(c);
+  NewSettings_ApplyHudEditValue(true);
+  g_new_settings_dirty = 1;
+  return true;
+}
+
 bool Hud_NewSettingsMenu_CaptureKey(const char *key_name) {
   if (!(main_module_index == 14 && submodule_index == 12 && overworld_map_state == 3))
     return false;
+  if (NewSettings_CaptureHudValueKey(key_name))
+    return true;
   if (g_new_settings_page == kNewSettingsPage_Keymap) {
     if (g_new_settings_cursor <= 1 || g_new_settings_hud_column != 1)
       return false;
@@ -2407,8 +2674,7 @@ bool Hud_NewSettingsMenu_CaptureGamepadButton(int button) {
 }
 
 bool Hud_NewSettingsMenu_BlocksGamepadInput() {
-  return main_module_index == 14 && submodule_index == 12 && overworld_map_state == 3 &&
-         g_new_settings_page == kNewSettingsPage_Gamepad && g_new_settings_hud_column == 1;
+  return false;
 }
 
 bool Hud_NewSettingsMenuWantsHudPreview() {
@@ -2417,6 +2683,7 @@ bool Hud_NewSettingsMenuWantsHudPreview() {
 }
 
 static void Hud_NewSettingsMenu_DrawBlank() {
+  NewSettings_ClearHudEdit();
   g_new_settings_page = kNewSettingsPage_Home;
   g_new_settings_back_page = kNewSettingsPage_Home;
   g_new_settings_cursor = 0;
@@ -3060,13 +3327,13 @@ void Hud_AnimateHeartRefill() {  // 8df14f
   int y = Hud_RearrangeEnabled() ? Hud_ClampHudBlockY(g_config.hud_hearts_pos_y, 2) : 1;
   if (n >= 20) {
     n -= 20;
-    y++;
+    y += Hud_TileOffset(1);
   }
   n &= 0xff;
   animate_heart_refill_countdown = 1;
 
   static const uint16 kAnimHeartPartial[4] = { 0x24A3, 0x24A4, 0x24A3, 0x24A0 };
-  Hud_SetTopHudTile(x + (n >> 1), y, kAnimHeartPartial[animate_heart_refill_countdown_subpos]);
+  Hud_SetTopHudTile(x + Hud_TileOffset(n >> 1), y, kAnimHeartPartial[animate_heart_refill_countdown_subpos]);
 
   animate_heart_refill_countdown_subpos = (animate_heart_refill_countdown_subpos + 1) & 3;
   if (!animate_heart_refill_countdown_subpos) {
@@ -3122,7 +3389,7 @@ static void Hud_DrawItemBoxLabel(char label, int box_x, int box_y) {
   if (!Hud_RearrangeEnabled() || !Hud_HasAssignedSwitchItem())
     return;
   int tile = label == 'Y' ? 0x10 : label == 'X' ? 0x11 : label == 'L' ? 0x12 : 0x13;
-  Hud_SetTopHudTile(box_x + 3, Hud_ClampHudY(box_y + 3), 0x2400 | tile);
+  Hud_SetTopHudTile(box_x + Hud_TileOffset(3), Hud_ClampHudY(box_y + Hud_TileOffset(3)), 0x2400 | tile);
 }
 
 /* Refresh the in-game item boxes.  The Y item is always shown when equipped; the X/L/R quick
@@ -3160,10 +3427,10 @@ static void Hud_UpdateHearts_Inner(int base_x, int y, const uint16 *src, int n) 
   int x = 0;
   while (n > 0) {
     if (x >= 10) {
-      y++;
+      y += Hud_TileOffset(1);
       x = 0;
     }
-    Hud_SetTopHudTile(base_x + x, y, src[n >= 5 ? 2 : 1]);
+    Hud_SetTopHudTile(base_x + Hud_TileOffset(x), y, src[n >= 5 ? 2 : 1]);
     x++;
     n -= 8;
   }
@@ -3201,16 +3468,16 @@ static void Hud_Update_Magic() {  // 8dfc09
   int y = Hud_RearrangeEnabled() ? Hud_ClampHudBlockY(g_config.hud_magic_meter_pos_y, 5) : 0;
   if (link_magic_consumption >= 1) {
     if (!Hud_RearrangeEnabled()) {
-      Hud_SetTopHudTile(x + 0, y + 0, 0x28F7);
-      Hud_SetTopHudTile(x + 1, y + 0, 0x2851);
-      Hud_SetTopHudTile(x + 2, y + 0, 0x28FA);
+      Hud_SetTopHudTile(x + Hud_TileOffset(0), y + Hud_TileOffset(0), 0x28F7);
+      Hud_SetTopHudTile(x + Hud_TileOffset(1), y + Hud_TileOffset(0), 0x2851);
+      Hud_SetTopHudTile(x + Hud_TileOffset(2), y + Hud_TileOffset(0), 0x28FA);
     }
   }
   const uint16 *src = kUpdateMagicPowerTilemap[(link_magic_power + 7) >> 3];
-  Hud_SetTopHudTile(x + 1, y + 1, src[0]);
-  Hud_SetTopHudTile(x + 1, y + 2, src[1]);
-  Hud_SetTopHudTile(x + 1, y + 3, src[2]);
-  Hud_SetTopHudTile(x + 1, y + 4, src[3]);
+  Hud_SetTopHudTile(x + Hud_TileOffset(1), y + Hud_TileOffset(1), src[0]);
+  Hud_SetTopHudTile(x + Hud_TileOffset(1), y + Hud_TileOffset(2), src[1]);
+  Hud_SetTopHudTile(x + Hud_TileOffset(1), y + Hud_TileOffset(3), src[2]);
+  Hud_SetTopHudTile(x + Hud_TileOffset(1), y + Hud_TileOffset(4), src[3]);
 }
 
 /* Refresh the per-counter readouts of the HUD: rupee count, bomb count, arrow count, key
@@ -3269,7 +3536,8 @@ static void Hud_Update_Inventory() {  // 8dfc09
                           kHudKeyBg, 1, 2, 1);
     } else {
       Hud_SetTopHudTile(g_config.hud_keys_bg_pos_x, Hud_ClampHudBlockY(g_config.hud_keys_bg_pos_y, 2), 0x207f);
-      Hud_SetTopHudTile(g_config.hud_keys_bg_pos_x, Hud_ClampHudBlockY(g_config.hud_keys_bg_pos_y, 2) + 1, 0x207f);
+      Hud_SetTopHudTile(g_config.hud_keys_bg_pos_x,
+                        Hud_ClampHudBlockY(g_config.hud_keys_bg_pos_y, 2) + Hud_TileOffset(1), 0x207f);
     }
   } else {
     Hud_DrawTopHudBlock(counters_x, counters_y + 0, kHudInventoryBg + 0 + inv_offs, 12, 1, 12);
@@ -3280,7 +3548,8 @@ static void Hud_Update_Inventory() {  // 8dfc09
     if (link_item_bow >= 3) {
       if (Hud_RearrangeEnabled()) {
         Hud_SetTopHudTile(g_config.hud_arrow_upgrade_bg_pos_x, Hud_ClampHudBlockY(g_config.hud_arrow_upgrade_bg_pos_y, 1), 0x2486);
-        Hud_SetTopHudTile(g_config.hud_arrow_upgrade_bg_pos_x + 1, Hud_ClampHudBlockY(g_config.hud_arrow_upgrade_bg_pos_y, 1), 0x2487);
+        Hud_SetTopHudTile(g_config.hud_arrow_upgrade_bg_pos_x + Hud_TileOffset(1),
+                          Hud_ClampHudBlockY(g_config.hud_arrow_upgrade_bg_pos_y, 1), 0x2487);
       } else {
         Hud_SetTopHudTile(counters_x + 7, counters_y + 0, 0x2486);
         Hud_SetTopHudTile(counters_x + 8, counters_y + 0, 0x2487);
@@ -3295,23 +3564,23 @@ static void Hud_Update_Inventory() {  // 8dfc09
   int base_tile = base_tiles[link_rupees_actual == MaxRupees()];
   int rupees_y = Hud_RearrangeEnabled() ? Hud_ClampHudBlockY(g_config.hud_rupees_pos_y, 1) : counters_y + 1;
   if (inv_offs == 0) {
-    Hud_SetTopHudTile(Hud_GroupX(counters_x + 0, g_config.hud_rupees_pos_x - 1), rupees_y, base_tile | d[0]);
+    Hud_SetTopHudTile(Hud_GroupX(counters_x + 0, g_config.hud_rupees_pos_x - Hud_TileOffset(1)), rupees_y, base_tile | d[0]);
   }
   Hud_SetTopHudTile(Hud_GroupX(counters_x + 1, g_config.hud_rupees_pos_x), rupees_y, base_tile | d[1]);
-  Hud_SetTopHudTile(Hud_GroupX(counters_x + 2, g_config.hud_rupees_pos_x + 1), rupees_y, base_tile | d[2]);
-  Hud_SetTopHudTile(Hud_GroupX(counters_x + 3, g_config.hud_rupees_pos_x + 2), rupees_y, base_tile | d[3]);
+  Hud_SetTopHudTile(Hud_GroupX(counters_x + 2, g_config.hud_rupees_pos_x + Hud_TileOffset(1)), rupees_y, base_tile | d[2]);
+  Hud_SetTopHudTile(Hud_GroupX(counters_x + 3, g_config.hud_rupees_pos_x + Hud_TileOffset(2)), rupees_y, base_tile | d[3]);
 
   Hud_IntToDecimal(link_item_bombs, d);
   base_tile = base_tiles[link_item_bombs == kMaxBombsForLevel[link_bomb_upgrades]];
   int bombs_y = Hud_RearrangeEnabled() ? Hud_ClampHudBlockY(g_config.hud_bombs_pos_y, 1) : counters_y + 1;
   Hud_SetTopHudTile(Hud_GroupX(counters_x + 5, g_config.hud_bombs_pos_x), bombs_y, base_tile | d[2]);
-  Hud_SetTopHudTile(Hud_GroupX(counters_x + 6, g_config.hud_bombs_pos_x + 1), bombs_y, base_tile | d[3]);
+  Hud_SetTopHudTile(Hud_GroupX(counters_x + 6, g_config.hud_bombs_pos_x + Hud_TileOffset(1)), bombs_y, base_tile | d[3]);
 
   Hud_IntToDecimal(link_num_arrows, d);
   base_tile = base_tiles[link_num_arrows == kMaxArrowsForLevel[link_arrow_upgrades]];
   int arrows_y = Hud_RearrangeEnabled() ? Hud_ClampHudBlockY(g_config.hud_arrows_pos_y, 1) : counters_y + 1;
   Hud_SetTopHudTile(Hud_GroupX(counters_x + 8, g_config.hud_arrows_pos_x), arrows_y, base_tile | d[2]);
-  Hud_SetTopHudTile(Hud_GroupX(counters_x + 9, g_config.hud_arrows_pos_x + 1), arrows_y, base_tile | d[3]);
+  Hud_SetTopHudTile(Hud_GroupX(counters_x + 9, g_config.hud_arrows_pos_x + Hud_TileOffset(1)), arrows_y, base_tile | d[3]);
 
   // Show keys
   d[3] = 0x7f;
@@ -3321,7 +3590,7 @@ static void Hud_Update_Inventory() {  // 8dfc09
   int key_y = Hud_RearrangeEnabled() ? Hud_ClampHudBlockY(g_config.hud_keys_pos_y, 1) : counters_y + 1;
   Hud_SetTopHudTile(key_x, key_y, 0x2400 | d[3]);
   if (*Hud_TopHudTilePtr(key_x, key_y) == 0x247f)
-    Hud_SetTopHudTile(key_x, key_y - 1, 0x247f);
+    Hud_SetTopHudTile(key_x, key_y - Hud_TileOffset(1), 0x247f);
 }
 
 /* Fully rebuild the in-game HUD tilemap (the 165 word region at the top of BG3).  Stamps the
@@ -3332,8 +3601,10 @@ static void Hud_Update_Inventory() {  // 8dfc09
  * uninitialized state had wiped tile (8,2). */
 void Hud_Rebuild() {  // 8dfa70
   if (Hud_RearrangeEnabled()) {
-    for (int i = 0; i < countof(g_wide_hud_tilemap); i++)
+    for (int i = 0; i < countof(g_wide_hud_tilemap); i++) {
       g_wide_hud_tilemap[i] = 0x207f;
+      g_wide_hud_tile_offsets[i] = 0;
+    }
   } else if (hud_tile_indices_buffer[HUDXY(8, 2)] == 0) {
     for (int i = 0; i < 165; i++)
       hud_tile_indices_buffer[i] = 0x207f;

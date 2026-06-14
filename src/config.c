@@ -22,6 +22,7 @@
 #include "config.h"
 #include "types.h"
 // Standard library — file I/O and string operations for INI parsing
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 // SDL — keyboard/gamepad input constants
@@ -449,14 +450,41 @@ static void ParseGamepadArray(char *value, int cmd, int size) {
   }
 }
 
+static bool ParseHudHalfTileCoord(char *value, int16 *result) {
+  while (*value == ' ' || *value == '\t')
+    value++;
+  char *end;
+  long whole = strtol(value, &end, 10);
+  long units = whole * 2;
+  if (end == value)
+    return false;
+  if (*end == '.') {
+    end++;
+    if (*end == '5') {
+      units += whole < 0 || value[0] == '-' ? -1 : 1;
+      end++;
+    } else if (*end == '0') {
+      end++;
+    } else {
+      return false;
+    }
+    while (*end == '0')
+      end++;
+  }
+  while (*end == ' ' || *end == '\t')
+    end++;
+  if (*end != 0 || units < INT16_MIN || units > INT16_MAX)
+    return false;
+  *result = (int16)units;
+  return true;
+}
+
 static bool ParseHudPosition(char *value, int16 *x, int16 *y) {
   char *sx = NextDelim(&value, ',');
   char *sy = NextDelim(&value, ',');
   if (sx == NULL || sy == NULL || NextDelim(&value, ',') != NULL)
     return false;
-  *x = (int16)strtol(sx, (char**)NULL, 10);
-  *y = (int16)strtol(sy, (char**)NULL, 10);
-  return true;
+  return ParseHudHalfTileCoord(sx, x) && ParseHudHalfTileCoord(sy, y);
 }
 
 static bool ParseUint8Clamped(char *value, uint8 *result, int min, int max) {
@@ -814,34 +842,34 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "HUDCounterBackdropPosition")) {
       if (!ParseHudPosition(value, &g_config.hud_rupees_bg_pos_x, &g_config.hud_rupees_bg_pos_y))
         return false;
-      g_config.hud_bombs_bg_pos_x = g_config.hud_rupees_bg_pos_x + 5;
+      g_config.hud_bombs_bg_pos_x = g_config.hud_rupees_bg_pos_x + 10;
       g_config.hud_bombs_bg_pos_y = g_config.hud_rupees_bg_pos_y;
-      g_config.hud_arrows_bg_pos_x = g_config.hud_rupees_bg_pos_x + 8;
+      g_config.hud_arrows_bg_pos_x = g_config.hud_rupees_bg_pos_x + 16;
       g_config.hud_arrows_bg_pos_y = g_config.hud_rupees_bg_pos_y;
-      g_config.hud_arrow_upgrade_bg_pos_x = g_config.hud_arrows_bg_pos_x - 1;
+      g_config.hud_arrow_upgrade_bg_pos_x = g_config.hud_arrows_bg_pos_x - 2;
       g_config.hud_arrow_upgrade_bg_pos_y = g_config.hud_arrows_bg_pos_y;
-      g_config.hud_keys_bg_pos_x = g_config.hud_rupees_bg_pos_x + 11;
+      g_config.hud_keys_bg_pos_x = g_config.hud_rupees_bg_pos_x + 22;
       g_config.hud_keys_bg_pos_y = g_config.hud_rupees_bg_pos_y;
       return true;
     } else if (StringEqualsNoCase(key, "HUDCountersPosition")) {
       if (!ParseHudPosition(value, &g_config.hud_rupees_bg_pos_x, &g_config.hud_rupees_bg_pos_y))
         return false;
-      g_config.hud_bombs_bg_pos_x = g_config.hud_rupees_bg_pos_x + 5;
+      g_config.hud_bombs_bg_pos_x = g_config.hud_rupees_bg_pos_x + 10;
       g_config.hud_bombs_bg_pos_y = g_config.hud_rupees_bg_pos_y;
-      g_config.hud_arrows_bg_pos_x = g_config.hud_rupees_bg_pos_x + 8;
+      g_config.hud_arrows_bg_pos_x = g_config.hud_rupees_bg_pos_x + 16;
       g_config.hud_arrows_bg_pos_y = g_config.hud_rupees_bg_pos_y;
-      g_config.hud_arrow_upgrade_bg_pos_x = g_config.hud_arrows_bg_pos_x - 1;
+      g_config.hud_arrow_upgrade_bg_pos_x = g_config.hud_arrows_bg_pos_x - 2;
       g_config.hud_arrow_upgrade_bg_pos_y = g_config.hud_arrows_bg_pos_y;
-      g_config.hud_keys_bg_pos_x = g_config.hud_rupees_bg_pos_x + 11;
+      g_config.hud_keys_bg_pos_x = g_config.hud_rupees_bg_pos_x + 22;
       g_config.hud_keys_bg_pos_y = g_config.hud_rupees_bg_pos_y;
-      g_config.hud_rupees_pos_x = g_config.hud_rupees_bg_pos_x + 1;
-      g_config.hud_rupees_pos_y = g_config.hud_rupees_bg_pos_y + 1;
+      g_config.hud_rupees_pos_x = g_config.hud_rupees_bg_pos_x + 2;
+      g_config.hud_rupees_pos_y = g_config.hud_rupees_bg_pos_y + 2;
       g_config.hud_bombs_pos_x = g_config.hud_bombs_bg_pos_x;
-      g_config.hud_bombs_pos_y = g_config.hud_bombs_bg_pos_y + 1;
+      g_config.hud_bombs_pos_y = g_config.hud_bombs_bg_pos_y + 2;
       g_config.hud_arrows_pos_x = g_config.hud_arrows_bg_pos_x;
-      g_config.hud_arrows_pos_y = g_config.hud_arrows_bg_pos_y + 1;
+      g_config.hud_arrows_pos_y = g_config.hud_arrows_bg_pos_y + 2;
       g_config.hud_keys_pos_x = g_config.hud_keys_bg_pos_x;
-      g_config.hud_keys_pos_y = g_config.hud_keys_bg_pos_y + 1;
+      g_config.hud_keys_pos_y = g_config.hud_keys_bg_pos_y + 2;
       return true;
     } else if (StringEqualsNoCase(key, "HUDHeartsFramePosition")) {
       return ParseHudPosition(value, &g_config.hud_hearts_frame_pos_x, &g_config.hud_hearts_frame_pos_y);
@@ -918,51 +946,53 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
  * bindings not explicitly set in the config file.
  */
 void ParseConfigFile(const char *filename) {
+#define HUD_POS(x) ((x) * 2)
   g_config.msuvolume = 100;  // default msu volume, 100%
-  g_config.hud_magic_frame_pos_x = 0;
-  g_config.hud_magic_frame_pos_y = 0;
-  g_config.hud_magic_meter_pos_x = 0;
-  g_config.hud_magic_meter_pos_y = 0;
-  g_config.hud_item_box_pos_x = 5;
-  g_config.hud_item_box_pos_y = 0;
-  g_config.hud_item_icon_pos_x = 6;
-  g_config.hud_item_icon_pos_y = 1;
-  g_config.hud_item_x_box_pos_x = 9;
-  g_config.hud_item_x_box_pos_y = 0;
-  g_config.hud_item_x_icon_pos_x = 10;
-  g_config.hud_item_x_icon_pos_y = 1;
-  g_config.hud_item_l_box_pos_x = 13;
-  g_config.hud_item_l_box_pos_y = 0;
-  g_config.hud_item_l_icon_pos_x = 14;
-  g_config.hud_item_l_icon_pos_y = 1;
-  g_config.hud_item_r_box_pos_x = 17;
-  g_config.hud_item_r_box_pos_y = 0;
-  g_config.hud_item_r_icon_pos_x = 18;
-  g_config.hud_item_r_icon_pos_y = 1;
-  g_config.hud_rupees_bg_pos_x = 15;
-  g_config.hud_rupees_bg_pos_y = 0;
-  g_config.hud_rupees_pos_x = 16;
-  g_config.hud_rupees_pos_y = 1;
-  g_config.hud_bombs_bg_pos_x = 20;
-  g_config.hud_bombs_bg_pos_y = 0;
-  g_config.hud_bombs_pos_x = 20;
-  g_config.hud_bombs_pos_y = 1;
-  g_config.hud_arrows_bg_pos_x = 23;
-  g_config.hud_arrows_bg_pos_y = 0;
-  g_config.hud_arrow_upgrade_bg_pos_x = 22;
-  g_config.hud_arrow_upgrade_bg_pos_y = 0;
-  g_config.hud_arrows_pos_x = 23;
-  g_config.hud_arrows_pos_y = 1;
-  g_config.hud_keys_bg_pos_x = 26;
-  g_config.hud_keys_bg_pos_y = 0;
-  g_config.hud_keys_pos_x = 26;
-  g_config.hud_keys_pos_y = 1;
-  g_config.hud_floor_indicator_pos_x = 31;
-  g_config.hud_floor_indicator_pos_y = 3;
-  g_config.hud_hearts_frame_pos_x = 29;
-  g_config.hud_hearts_frame_pos_y = 0;
-  g_config.hud_hearts_pos_x = 29;
-  g_config.hud_hearts_pos_y = 1;
+  g_config.hud_magic_frame_pos_x = HUD_POS(0);
+  g_config.hud_magic_frame_pos_y = HUD_POS(0);
+  g_config.hud_magic_meter_pos_x = HUD_POS(0);
+  g_config.hud_magic_meter_pos_y = HUD_POS(0);
+  g_config.hud_item_box_pos_x = HUD_POS(5);
+  g_config.hud_item_box_pos_y = HUD_POS(0);
+  g_config.hud_item_icon_pos_x = HUD_POS(6);
+  g_config.hud_item_icon_pos_y = HUD_POS(1);
+  g_config.hud_item_x_box_pos_x = HUD_POS(9);
+  g_config.hud_item_x_box_pos_y = HUD_POS(0);
+  g_config.hud_item_x_icon_pos_x = HUD_POS(10);
+  g_config.hud_item_x_icon_pos_y = HUD_POS(1);
+  g_config.hud_item_l_box_pos_x = HUD_POS(13);
+  g_config.hud_item_l_box_pos_y = HUD_POS(0);
+  g_config.hud_item_l_icon_pos_x = HUD_POS(14);
+  g_config.hud_item_l_icon_pos_y = HUD_POS(1);
+  g_config.hud_item_r_box_pos_x = HUD_POS(17);
+  g_config.hud_item_r_box_pos_y = HUD_POS(0);
+  g_config.hud_item_r_icon_pos_x = HUD_POS(18);
+  g_config.hud_item_r_icon_pos_y = HUD_POS(1);
+  g_config.hud_rupees_bg_pos_x = HUD_POS(15);
+  g_config.hud_rupees_bg_pos_y = HUD_POS(0);
+  g_config.hud_rupees_pos_x = HUD_POS(16);
+  g_config.hud_rupees_pos_y = HUD_POS(1);
+  g_config.hud_bombs_bg_pos_x = HUD_POS(20);
+  g_config.hud_bombs_bg_pos_y = HUD_POS(0);
+  g_config.hud_bombs_pos_x = HUD_POS(20);
+  g_config.hud_bombs_pos_y = HUD_POS(1);
+  g_config.hud_arrows_bg_pos_x = HUD_POS(23);
+  g_config.hud_arrows_bg_pos_y = HUD_POS(0);
+  g_config.hud_arrow_upgrade_bg_pos_x = HUD_POS(22);
+  g_config.hud_arrow_upgrade_bg_pos_y = HUD_POS(0);
+  g_config.hud_arrows_pos_x = HUD_POS(23);
+  g_config.hud_arrows_pos_y = HUD_POS(1);
+  g_config.hud_keys_bg_pos_x = HUD_POS(26);
+  g_config.hud_keys_bg_pos_y = HUD_POS(0);
+  g_config.hud_keys_pos_x = HUD_POS(26);
+  g_config.hud_keys_pos_y = HUD_POS(1);
+  g_config.hud_floor_indicator_pos_x = HUD_POS(31);
+  g_config.hud_floor_indicator_pos_y = HUD_POS(3);
+  g_config.hud_hearts_frame_pos_x = HUD_POS(29);
+  g_config.hud_hearts_frame_pos_y = HUD_POS(0);
+  g_config.hud_hearts_pos_x = HUD_POS(29);
+  g_config.hud_hearts_pos_y = HUD_POS(1);
+#undef HUD_POS
 
   // Try user config first; fall back to default config
   if (filename != NULL || !ParseOneConfigFile("zelda3.user.ini", 0)) {

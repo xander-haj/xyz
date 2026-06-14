@@ -177,7 +177,8 @@ struct Ppu {
   bool widescreenBorderFillBeforeBg3; // Fill menu-time side padding before BG3 UI is composited
   bool renderWideHud;      // Draw BG3 HUD over the full widescreen viewport
   bool anchorWideHudBg3;   // Apply BG3 HUD anchoring only while the legacy gameplay strip is active
-  const uint16_t *wideHudTilemap; // 64-column widescreen HUD tilemap supplied by the game layer
+  const uint16_t *wideHudTilemap; // 128x60 half-tile widescreen HUD map supplied by the game layer
+  const uint8_t *wideHudTileOffsets; // Per-half-cell source-pixel offsets for sub-tile HUD placement
   uint8_t wideHudShadowSize; // Pixel width of the bottom/right HUD shadow
   uint32_t renderPitch;    // Byte stride between rows in the output renderBuffer
   uint8_t *renderBuffer;   // Pointer to the caller's output pixel buffer
@@ -299,6 +300,7 @@ void PpuSetMode7PerspectiveCorrection(Ppu *ppu, int low, int high);
 // letting their BG3 frames become the repeated edge source.
 void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom,
                           PpuWidescreenBorderFillMode fill_mode, bool fill_before_bg3);
-void PpuSetRenderWideHud(Ppu *ppu, bool enabled, bool anchor_bg3, const uint16_t *tilemap, uint8_t shadow_size);
+void PpuSetRenderWideHud(Ppu *ppu, bool enabled, bool anchor_bg3, const uint16_t *tilemap,
+                         const uint8_t *tile_offsets, uint8_t shadow_size);
 
 #endif  // ZELDA3_SNES_PPU_H_

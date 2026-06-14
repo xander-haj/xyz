@@ -99,8 +99,11 @@ bool Hud_ToggleNewSettingsMenu();
 // True while the settings menu is on the HUD-position editor page.
 bool Hud_NewSettingsMenuWantsHudPreview();
 
-// Full 64x30 tilemap used by the widescreen HUD overlay.
+// Full 128x60 half-tile tilemap used by the widescreen HUD overlay.
 const uint16 *Hud_GetWideHudTilemap();
+
+// Per-half-cell source-pixel offsets for the widescreen HUD overlay.
+const uint8 *Hud_GetWideHudTileOffsets();
 
 // Clears the BG3 tilemap region used by the menu, preparing a blank canvas
 // before drawing menu contents.
