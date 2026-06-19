@@ -223,6 +223,9 @@
     <ClCompile Include="src\poly.c">
       <Filter>Zelda</Filter>
     </ClCompile>
+    <ClCompile Include="src\runtime_paths.c">
+      <Filter>Zelda</Filter>
+    </ClCompile>
     <ClCompile Include="src\select_file.c">
       <Filter>Zelda</Filter>
     </ClCompile>
@@ -378,6 +381,9 @@
     <ClInclude Include="src\config.h">
       <Filter>Zelda</Filter>
     </ClInclude>
+    <ClInclude Include="src\default_config.h">
+      <Filter>Zelda</Filter>
+    </ClInclude>
     <ClInclude Include="src\dungeon.h">
       <Filter>Zelda</Filter>
     </ClInclude>
@@ -421,6 +427,9 @@
       <Filter>Zelda</Filter>
     </ClInclude>
     <ClInclude Include="src\platform\win32\resource.h">
+      <Filter>Zelda</Filter>
+    </ClInclude>
+    <ClInclude Include="src\runtime_paths.h">
       <Filter>Zelda</Filter>
     </ClInclude>
     <ClInclude Include="src\select_file.h">

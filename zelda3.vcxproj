@@ -244,6 +244,7 @@
     <ClCompile Include="src\player.c" />
     <ClCompile Include="src\player_oam.c" />
     <ClCompile Include="src\poly.c" />
+    <ClCompile Include="src\runtime_paths.c" />
     <ClCompile Include="src\select_file.c" />
     <ClCompile Include="src\opengl.c" />
     <ClCompile Include="snes\apu.c">
@@ -453,6 +454,7 @@
     <ClInclude Include="src\assets.h" />
     <ClInclude Include="src\attract.h" />
     <ClInclude Include="src\config.h" />
+    <ClInclude Include="src\default_config.h" />
     <ClInclude Include="src\dungeon.h" />
     <ClInclude Include="src\ending.h" />
     <ClInclude Include="src\features.h" />
@@ -470,6 +472,7 @@
     <ClInclude Include="src\player_oam.h" />
     <ClInclude Include="src\poly.h" />
     <ClInclude Include="src\platform\win32\resource.h" />
+    <ClInclude Include="src\runtime_paths.h" />
     <ClInclude Include="src\select_file.h" />
     <ClInclude Include="snes\apu.h" />
     <ClInclude Include="snes\cart.h" />

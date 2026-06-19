@@ -37,6 +37,7 @@
 #include "messaging.h"
 #include "config.h"
 #include "features.h"
+#include "runtime_paths.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -144,6 +145,14 @@ static int Hud_ClampHudBlockY(int y, int h) {
 
 static int Hud_GroupX(int default_x, int configured_x) {
   return Hud_RearrangeEnabled() ? configured_x : default_x;
+}
+
+/* Return true when two half-cell spans touch the same HUD overlay cells.
+ * This keeps overlap checks correct for both whole-tile and .5 HUD positions. */
+static bool Hud_HalfCellRangesOverlap(int first_start, int first_width, int second_start, int second_width) {
+  int first_end = first_start + first_width;
+  int second_end = second_start + second_width;
+  return first_start < second_end && second_start < first_end;
 }
 
 static bool Hud_ItemSwitchHudEnabled() {
@@ -1523,9 +1532,13 @@ static char *NewSettings_Trim(char *s) {
   return s;
 }
 
-static bool NewSettings_ReadIniValue(const char *section, const char *key, char *out, size_t out_size) {
+/* NewSettings_ReadIniValueFromFile: reads one section/key value from a single
+ * INI file without following !include directives. The wrapper below performs
+ * the menu's user-override-then-default lookup order. */
+static bool NewSettings_ReadIniValueFromFile(const char *filename, const char *section, const char *key,
+                                             char *out, size_t out_size) {
   size_t len = 0;
-  char *file = (char *)ReadWholeFile("zelda3.ini", &len);
+  char *file = (char *)ReadWholeFile(filename, &len);
   if (!file)
     return false;
 
@@ -1573,6 +1586,14 @@ static bool NewSettings_ReadIniValue(const char *section, const char *key, char 
   return false;
 }
 
+/* NewSettings_ReadIniValue: resolves editable menu values from user overrides
+ * first, then from the selected default file when the user file has no value. */
+static bool NewSettings_ReadIniValue(const char *section, const char *key, char *out, size_t out_size) {
+  if (NewSettings_ReadIniValueFromFile(RuntimePath_UserConfigFile(), section, key, out, out_size))
+    return true;
+  return NewSettings_ReadIniValueFromFile(RuntimePath_DefaultConfigFile(), section, key, out, out_size);
+}
+
 static void NewSettings_CopyBinding(char dst[kNewSettingsInputValueLen], const char *value) {
   snprintf(dst, kNewSettingsInputValueLen, "%s", value);
 }
@@ -1607,20 +1628,54 @@ static void NewSettings_LoadInputBindings() {
   }
 }
 
-static void NewSettings_WriteIniValue(const char *section, const char *key, const char *value) {
+/* NewSettings_EnsureUserIniFile: creates the editable config file on first
+ * settings save. Linux /opt installs use an override file; other builds edit
+ * the normal zelda3.ini. */
+static bool NewSettings_EnsureUserIniFile() {
   size_t len = 0;
-  char *file = (char *)ReadWholeFile("zelda3.ini", &len);
-  if (!file)
+  const char *user_ini_file = RuntimePath_UserConfigFile();
+  char *file = (char *)ReadWholeFile(user_ini_file, &len);
+  if (file) {
+    free(file);
+    return true;
+  }
+
+  FILE *f = fopen(user_ini_file, "wb");
+  if (!f) {
+    fprintf(stderr, "Warning: Unable to create %s\n", user_ini_file);
+    return false;
+  }
+
+  bool created = fclose(f) == 0;
+  if (!created)
+    fprintf(stderr, "Warning: Unable to write %s\n", user_ini_file);
+  return created;
+}
+
+/* NewSettings_WriteIniValue: writes changed settings to the resolved editable
+ * config file. Linux /opt installs keep the shipped default config untouched. */
+static void NewSettings_WriteIniValue(const char *section, const char *key, const char *value) {
+  if (!NewSettings_EnsureUserIniFile())
     return;
+
+  size_t len = 0;
+  const char *user_ini_file = RuntimePath_UserConfigFile();
+  char *file = (char *)ReadWholeFile(user_ini_file, &len);
+  if (!file) {
+    fprintf(stderr, "Warning: Unable to read %s\n", user_ini_file);
+    return;
+  }
 
   char section_header[64];
   snprintf(section_header, sizeof(section_header), "[%s]", section);
   char *section_start = strstr(file, section_header);
   if (!section_start) {
-    FILE *f = fopen("zelda3.ini", "ab");
+    FILE *f = fopen(user_ini_file, "ab");
     if (f) {
       fprintf(f, "\n[%s]\n%s = %s\n", section, key, value);
       fclose(f);
+    } else {
+      fprintf(stderr, "Warning: Unable to append %s\n", user_ini_file);
     }
     free(file);
     return;
@@ -1672,10 +1727,12 @@ static void NewSettings_WriteIniValue(const char *section, const char *key, cons
     ByteArray_AppendData(&out, (uint8 *)section_end, file + len - section_end);
   }
 
-  FILE *f = fopen("zelda3.ini", "wb");
+  FILE *f = fopen(user_ini_file, "wb");
   if (f) {
     fwrite(out.data, 1, out.size, f);
     fclose(f);
+  } else {
+    fprintf(stderr, "Warning: Unable to update %s\n", user_ini_file);
   }
   ByteArray_Destroy(&out);
   free(file);
@@ -3484,8 +3541,8 @@ static void Hud_Update_Magic() {  // 8dfc09
  * count, and the bow icon's "with-arrows" state.
  *   - Each counter is rendered with Hud_IntToDecimal and stamped one digit per tile, in
  *     yellow (0x3400) when at maximum and white (0x2400) otherwise.
- *   - inv_offs shifts the rupee column over by one when the rupee count exceeds 999, so the
- *     four-digit display fits.
+ *   - inv_offs selects the legacy three-digit backdrop offset; when it is zero, the rupee
+ *     count is four digits and grows one tile left.
  *   - Switching link_item_bow between values 1↔2 and 3↔4 toggles the icon between empty- and
  *     filled-quiver graphics whenever the arrow count crosses zero.
  *   - link_num_keys == 0xff renders blank, used outside of dungeons. */
@@ -3525,8 +3582,18 @@ static void Hud_Update_Inventory() {  // 8dfc09
   int counters_x = 8;
   int counters_y = 0;
   if (Hud_RearrangeEnabled()) {
-    Hud_DrawTopHudBlock(g_config.hud_rupees_bg_pos_x, Hud_ClampHudBlockY(g_config.hud_rupees_bg_pos_y, 2),
-                        kHudRupeeBg, 5, 2, 5);
+    int rupee_bg_x = g_config.hud_rupees_bg_pos_x;
+    int rupee_bg_y = Hud_ClampHudBlockY(g_config.hud_rupees_bg_pos_y, 2);
+    int rupee_digit_x = g_config.hud_rupees_pos_x - (inv_offs == 0 ? Hud_TileOffset(1) : 0);
+    int rupee_digit_y = Hud_ClampHudBlockY(g_config.hud_rupees_pos_y, 1);
+    int rupee_icon_x = rupee_bg_x + Hud_TileOffset(2);
+    // Four-digit rupees grow one tile left; move same-row icons left so the thousands tile cannot cover them.
+    if (inv_offs == 0 &&
+        Hud_HalfCellRangesOverlap(rupee_icon_x, kHudHalfTile, rupee_digit_x, kHudHalfTile) &&
+        Hud_HalfCellRangesOverlap(rupee_bg_y, kHudHalfTile, rupee_digit_y, kHudHalfTile)) {
+      rupee_bg_x -= Hud_TileOffset(1);
+    }
+    Hud_DrawTopHudBlock(rupee_bg_x, rupee_bg_y, kHudRupeeBg, 5, 2, 5);
     Hud_DrawTopHudBlock(g_config.hud_bombs_bg_pos_x, Hud_ClampHudBlockY(g_config.hud_bombs_bg_pos_y, 2),
                         kHudBombBg, 2, 2, 2);
     Hud_DrawTopHudBlock(g_config.hud_arrows_bg_pos_x, Hud_ClampHudBlockY(g_config.hud_arrows_bg_pos_y, 2),

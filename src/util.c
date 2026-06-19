@@ -230,12 +230,31 @@ char *NextPossiblyQuotedString(char **s) {
   return r;
 }
 
+/* PathIsAbsolute: checks whether a path already names a filesystem root.
+ *
+ * Parameters:
+ *   path - path string to inspect.
+ *
+ * Returns true for Unix roots, Windows drive roots, and Windows UNC paths.
+ */
+static bool PathIsAbsolute(const char *path) {
+  if (!path || !path[0])
+    return false;
+#ifdef _WIN32
+  if ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z'))
+    return path[1] == ':' && (path[2] == '/' || path[2] == '\\');
+  return (path[0] == '/' || path[0] == '\\') && (path[1] == '/' || path[1] == '\\');
+#else
+  return path[0] == '/';
+#endif
+}
+
 /*
  * ReplaceFilenameWithNewPath — swap the filename in a path, keeping the dir.
  *
  * Given old_path = "roms/zelda3.sfc" and new_path = "patch.bps", this
- * produces "roms/patch.bps". Used to locate companion files (BPS patches,
- * asset packs, MSU audio) in the same directory as the ROM.
+ * produces "roms/patch.bps". Absolute new_path values are returned unchanged.
+ * Used to locate companion files and INI includes beside a source file.
  *
  * Parameters:
  *   old_path — the original file path whose directory prefix is preserved.
@@ -247,6 +266,11 @@ char *ReplaceFilenameWithNewPath(const char *old_path, const char *new_path) {
   size_t olen = strlen(old_path);
   /* +1 for the NUL terminator that will be copied from new_path. */
   size_t nlen = strlen(new_path) + 1;
+  if (PathIsAbsolute(new_path)) {
+    char *result = malloc(nlen);
+    memcpy(result, new_path, nlen);
+    return result;
+  }
   /* Walk backward from the end of old_path until we hit a directory separator
    * (or run out of characters), leaving olen at the length of the directory
    * prefix including the trailing slash. */

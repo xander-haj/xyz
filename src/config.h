@@ -216,7 +216,8 @@ enum {
 extern Config g_config;
 
 /* ParseConfigFile — Reads and parses the INI configuration file.
- * If filename is NULL, tries "zelda3.user.ini" first, then "zelda3.ini".
+ * If filename is NULL, tries the runtime path layer's per-user override
+ * first, then the per-user default config file.
  * After parsing, registers default key/gamepad bindings for any actions
  * not explicitly bound in the INI file. */
 void ParseConfigFile(const char *filename);

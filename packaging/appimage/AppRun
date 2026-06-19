@@ -5,6 +5,23 @@ appdir="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
 data_base="${XDG_DATA_HOME:-$HOME/.local/share}"
 data_dir="${data_base}/Z3R"
 
+# Parse --data-dir <path> from arguments and strip it from the forwarded args.
+rest=""
+skip=0
+for arg in "$@"; do
+  if [ "$skip" = "1" ]; then
+    data_dir="$arg"
+    skip=0
+    continue
+  fi
+  if [ "$arg" = "--data-dir" ]; then
+    skip=1
+    continue
+  fi
+  rest="$rest $arg"
+done
+set -- $rest
+
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-pulseaudio}"
 
 for lib_dir in "${appdir}/usr/lib" "${appdir}/usr/lib/x86_64-linux-gnu"; do

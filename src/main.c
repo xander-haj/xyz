@@ -4,9 +4,9 @@
  * SDL2-based platform entry point and host shell for the zelda3 reimplementation.
  *
  * Responsibilities of this file:
- *   - Process startup: parse the command line, locate and load zelda3.ini,
- *     load assets (zelda3_assets.dat or BPS-patched ROM), and bring up the
- *     core game runtime via ZeldaInitialize() in zelda_rtl.c.
+ *   - Process startup: parse the command line, resolve config/save paths, load
+ *     assets (zelda3_assets.dat or BPS-patched ROM), and bring up the core game
+ *     runtime via ZeldaInitialize() in zelda_rtl.c.
  *   - Window/renderer bring-up: open the SDL window, choose between the SDL
  *     renderer (kSdlRendererFuncs in this file) and the OpenGL renderer
  *     (provided by opengl.c via OpenGLRenderer_Create), and route every PPU
@@ -41,11 +41,6 @@
 #include <SDL.h>
 #ifdef _WIN32
 #include "platform/win32/volume_control.h"
-#include <direct.h>
-#else
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 #endif
 
 #include "snes/ppu.h"
@@ -57,6 +52,7 @@
 #include "zelda_cpu_infra.h"
 
 #include "config.h"
+#include "runtime_paths.h"
 #include "features.h"
 #include "hud.h"
 #include "assets.h"
@@ -86,7 +82,6 @@ static void OpenOneGamepad(int i);
 static bool CaptureNewSettingsKey(SDL_Keycode key, SDL_Keymod mod);
 static void HandleVolumeAdjustment(int volume_adjustment);
 static void LoadAssets();
-static void SwitchDirectory();
 
 /* Default values used when the parsed config (zelda3.ini) leaves a setting
  * unspecified or out of range. kMaxWindowScale caps integer window
@@ -588,9 +583,8 @@ void OpenGLRenderer_Create(struct RendererFuncs *funcs, bool use_opengl_es);
 /* main: process entry point.
  *
  * High-level startup sequence:
- *   1. Parse args - optional `--config <file>` overrides the default
- *      INI search; otherwise SwitchDirectory walks up the cwd looking
- *      for zelda3.ini so the binary can be launched from any subfolder.
+ *   1. Parse args, resolve runtime/config/save paths, then load the INI
+ *      configuration.
  *   2. Load configuration, assets, and the optional ZSPR Link sprite.
  *   3. Initialize the engine (ZeldaInitialize) and pick the runtime
  *      PPU geometry / render flags from the config.
@@ -605,16 +599,15 @@ void OpenGLRenderer_Create(struct RendererFuncs *funcs, bool use_opengl_es);
 int main(int argc, char** argv) {
   argc--, argv++;
   const char *config_file = NULL;
-  /* `--config <path>` lets the user point at an arbitrary INI file
-   * (useful for shipping multiple presets). When absent, fall back to
-   * walking the cwd to find a co-located zelda3.ini. */
+  /* `--config <path>` lets wrappers point at a managed config directory.
+   * RuntimePaths_Init then resolves config/save paths and the shared asset path
+   * before the config parser or asset loader touches disk. */
   if (argc >= 2 && strcmp(argv[0], "--config") == 0) {
     config_file = argv[1];
     argc -= 2, argv += 2;
-  } else {
-    SwitchDirectory();
   }
-  ParseConfigFile(config_file);
+  RuntimePaths_Init(config_file);
+  ParseConfigFile(NULL);
   LoadAssets();
   LoadLinkGraphics();
 
@@ -752,13 +745,9 @@ int main(int argc, char** argv) {
   if (argc >= 1 && !g_run_without_emu)
     LoadRom(argv[0]);
 
-  /* Make sure the saves directory exists before SaveLoadSlot tries to
-   * write into it. The Windows CRT spelling differs from POSIX mkdir. */
-#if defined(_WIN32)
-  _mkdir("saves");
-#else
-  mkdir("saves", 0755);
-#endif
+  /* Make sure the resolved save directory exists before SaveLoadSlot tries to
+   * write into it. Runtime path resolution keeps Linux /opt installs read-only. */
+  RuntimePaths_EnsureSaveDir();
 
   ZeldaReadSram();
 
@@ -1508,17 +1497,17 @@ uint32 g_asset_sizes[kNumberOfAssets];
  */
 static void LoadAssets() {
   size_t length = 0;
-  uint8 *data = ReadWholeFile("zelda3_assets.dat", &length);
+  uint8 *data = ReadWholeFile(RuntimePath_AssetsFile(), &length);
   if (!data) {
     /* Fall-back path: synthesize the asset blob from a BPS patch
      * applied to the user's original SNES ROM. Both files must be
      * present and the patch must apply cleanly. */
     size_t bps_length, bps_src_length;
     uint8 *bps, *bps_src;
-    bps = ReadWholeFile("zelda3_assets.bps", &bps_length);
+    bps = ReadWholeFile(RuntimePath_BpsFile(), &bps_length);
     if (!bps)
       Die("Failed to read zelda3_assets.dat. Please see the README for information about how you get this file.");
-    bps_src = ReadWholeFile("zelda3.sfc", &bps_src_length);
+    bps_src = ReadWholeFile(RuntimePath_BpsSourceRomFile(), &bps_src_length);
     if (!bps_src)
       Die("Missing file: zelda3.sfc");
     data = ApplyBps(bps_src, bps_src_length, bps, bps_length, &length);
@@ -1560,47 +1549,6 @@ static void LoadAssets() {
     kPalette_DungBgMain[0x484] = 0x70;
     kPalette_DungBgMain[0x485] = 0x95;
     kPalette_DungBgMain[0x486] = 0x57;
-  }
-}
-
-// Go some steps up and find zelda3.ini
-/* SwitchDirectory: search the current working directory and up to two
- * parent directories for zelda3.ini, and chdir into the one that
- * contains it. This lets the binary be launched from a deep build
- * subdirectory while still finding the assets in the project root.
- *
- * The walk is bounded to 3 steps so a misconfigured launcher cannot
- * accidentally walk up to the filesystem root.
- */
-static void SwitchDirectory() {
-  char buf[4096];
-  /* Reserve 32 bytes at the end for the "/zelda3.ini" suffix we will
-   * append below. */
-  if (!getcwd(buf, sizeof(buf) - 32))
-    return;
-  size_t pos = strlen(buf);
-
-  for (int step = 0; pos != 0 && step < 3; step++) {
-    memcpy(buf + pos, "/zelda3.ini", 12);
-    FILE *f = fopen(buf, "rb");
-    if (f) {
-      fclose(f);
-      buf[pos] = 0;
-      /* Only chdir if we actually moved up at least one level. step==0
-       * means the file is already in the current directory, no chdir
-       * needed. */
-      if (step != 0) {
-        printf("Found zelda3.ini in %s\n", buf);
-        int err = chdir(buf);
-        (void)err;
-      }
-      return;
-    }
-    /* Walk one directory up by trimming the last path component. The
-     * inner while peels characters off until it hits a path separator. */
-    pos--;
-    while (pos != 0 && buf[pos] != '/' && buf[pos] != '\\')
-      pos--;
   }
 }
 

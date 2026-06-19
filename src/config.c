@@ -2,7 +2,7 @@
  * config.c — INI Configuration File Parser and Input Binding System
  *
  * Implements the zelda3 configuration pipeline:
- * 1. Reads an INI-format config file (zelda3.ini or zelda3.user.ini)
+ * 1. Reads the default INI config and optional zelda3.user.ini overrides
  * 2. Dispatches key=value pairs to section-specific handlers
  * 3. Builds hash table mappings from SDL keycodes to game commands
  * 4. Builds linked-list mappings from gamepad buttons to game commands
@@ -21,6 +21,7 @@
 // Core project headers
 #include "config.h"
 #include "types.h"
+#include "runtime_paths.h"
 // Standard library — file I/O and string operations for INI parsing
 #include <stdint.h>
 #include <stdio.h>
@@ -937,9 +938,9 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
 /*
  * ParseConfigFile — Top-level entry point for configuration loading.
  *
- * Config file search order (when filename is NULL):
- *   1. Try "zelda3.user.ini" — user-specific overrides
- *   2. Fall back to "zelda3.ini" — shipped defaults
+ * Config file layering (when filename is NULL):
+ *   1. Load RuntimePath_DefaultConfigFile() — shipped or generated default
+ *   2. Load RuntimePath_UserConfigFile() — optional overrides
  *
  * If a specific filename is provided, only that file is tried.
  * After parsing, RegisterDefaultKeys() fills in defaults for any
@@ -994,12 +995,16 @@ void ParseConfigFile(const char *filename) {
   g_config.hud_hearts_pos_y = HUD_POS(1);
 #undef HUD_POS
 
-  // Try user config first; fall back to default config
-  if (filename != NULL || !ParseOneConfigFile("zelda3.user.ini", 0)) {
-    if (filename == NULL)
-      filename = "zelda3.ini";
+  if (filename != NULL) {
     if (!ParseOneConfigFile(filename, 0))
       fprintf(stderr, "Warning: Unable to read config file %s\n", filename);
+  } else {
+    filename = RuntimePath_DefaultConfigFile();
+    if (!ParseOneConfigFile(filename, 0))
+      fprintf(stderr, "Warning: Unable to read config file %s\n", filename);
+    const char *user_filename = RuntimePath_UserConfigFile();
+    if (strcmp(user_filename, filename) != 0)
+      ParseOneConfigFile(user_filename, 0);
   }
   RegisterDefaultKeys();
 }

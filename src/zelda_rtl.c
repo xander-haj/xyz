@@ -67,6 +67,7 @@
 #include "assets.h"
 #include "config.h"
 #include "hud.h"
+#include "runtime_paths.h"
 
 /*
  * g_zenv — Process-wide pointer hub for the SNES subsystems plus SRAM,
@@ -1680,8 +1681,8 @@ static const char *const kReferenceSaves[] = {
  * SaveLoadSlot — Save, load, or start replaying a slot file.
  *
  * cmd is one of kSaveLoad_Save / kSaveLoad_Load / kSaveLoad_Replay. The
- * `which` parameter picks the slot: 0..N for user slots ("saves/saveN.sav"),
- * or (256 + chapter_index) for the bundled reference saves in saves/ref/.
+ * `which` parameter picks the slot: 0..N for normal save slots, or
+ * (256 + chapter_index) for bundled reference saves in the shared runtime dir.
  *
  * Save-to-reference is rejected (reference saves are read-only). For
  * non-save commands, the file is opened "rb" and either loaded directly
@@ -1690,13 +1691,13 @@ static const char *const kReferenceSaves[] = {
  * empty slots from the UI).
  */
 void SaveLoadSlot(int cmd, int which) {
-  char name[128];
+  const char *name;
   if (which & 256) {
     if (cmd == kSaveLoad_Save)
       return;
-    sprintf(name, "saves/ref/%s", kReferenceSaves[which - 256]);
+    name = RuntimePath_ReferenceSaveFile(kReferenceSaves[which - 256]);
   } else {
-    sprintf(name, "saves/save%d.sav", which);
+    name = RuntimePath_SaveSlotFile(which);
   }
   FILE *f = fopen(name, cmd != kSaveLoad_Save ? "rb" : "wb");
   if (f) {
@@ -1821,10 +1822,10 @@ void PatchCommand(char c) {
  * initial SRAM.
  */
 void ZeldaReadSram() {
-  FILE *f = fopen("saves/sram.dat", "rb");
+  FILE *f = fopen(RuntimePath_SramFile(), "rb");
   if (f) {
     if (fread(g_zenv.sram, 1, 8192, f) != 8192)
-      fprintf(stderr, "Error reading saves/sram.dat\n");
+      fprintf(stderr, "Error reading %s\n", RuntimePath_SramFile());
     fclose(f);
     EmuSynchronizeWholeState();
   }
@@ -1840,12 +1841,15 @@ void ZeldaReadSram() {
  * we can't persist it.
  */
 void ZeldaWriteSram() {
-  rename("saves/sram.dat", "saves/sram.bak");
-  FILE *f = fopen("saves/sram.dat", "wb");
+  char sram_path[4096], backup_path[4096];
+  snprintf(sram_path, sizeof(sram_path), "%s", RuntimePath_SramFile());
+  snprintf(backup_path, sizeof(backup_path), "%s", RuntimePath_SramBackupFile());
+  rename(sram_path, backup_path);
+  FILE *f = fopen(sram_path, "wb");
   if (f) {
     fwrite(g_zenv.sram, 1, 8192, f);
     fclose(f);
   } else {
-    fprintf(stderr, "Unable to write saves/sram.dat\n");
+    fprintf(stderr, "Unable to write %s\n", sram_path);
   }
 }
