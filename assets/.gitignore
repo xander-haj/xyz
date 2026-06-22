@@ -1,15 +1,52 @@
+# =============================================================================
+# assets/.gitignore
+# =============================================================================
+# Excludes generated/extracted intermediate files that the asset pipeline
+# produces when running extract_resources.py or compile_resources.py.
+# These files are derived from the original SNES ROM (zelda3.sfc) and should
+# not be committed — any developer can regenerate them by running restool.py
+# with a copy of the ROM.
+# =============================================================================
+
+# The original SNES ROM binary; required as input but never committed
 zelda3.sfc
+# Extracted dialogue text files (one per language, e.g. dialogue.txt, dialogue_de.txt)
 dialogue*.txt
+# Auto-generated C header files produced during asset compilation
 generated_*.h
+# Python bytecode caches produced by running asset tools
+__pycache__/
+**/__pycache__/
+*.py[cod]
+**/*.py[cod]
+# Decoded Link character sprite sheet (4bpp, 128x448 pixels)
 linksprite.png
+# Overworld tile mapping data: maps 32x32-pixel tiles to 16x16 tile indices
 map32_to_map16.txt
+# Extracted overworld terrain grids; local ROM-derived sources for the editor pipeline
+/overworld_maps
+# Extracted overworld editor/viewer dump; rebuilt from local ROM/assets
+/overworld_dump
+# Generated local mod outputs rebuilt from data-only recipes and local assets
+/generated
+# Randomizer helper outputs produced from extracted dungeon YAML
+randomizer-masterlist.json
+/randomizer-spoilers
+# Extracted music instrument/sample metadata in YAML format
 music_info.yaml
+# Extracted sound effect pattern data in text format
 sfx.txt
+# Extracted raw audio: .spc dumps, .brr samples, .pcm decoded waveforms
 /sound
+# Extracted music score text files — one per sound bank
+# Each contains song/phrase/pattern definitions in a custom text format
+sound_*.txt
 sound_ending.txt
 sound_indoor.txt
 sound_intro.txt
+# Decoded HUD icon sprite sheet (hearts, items, etc.)
 /hud_icons.png
+# Decoded font sprite sheets (one per language variant)
 /font*.png
-/randomizer-masterlist.json
-/randomizer-spoilers/*.md
+
+

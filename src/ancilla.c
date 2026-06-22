@@ -38,6 +38,8 @@
 #include "tagalong.h"
 // Overworld map tile attribute lookups
 #include "overworld.h"
+// Movable grave position and tilemap tables shared with the overworld editor dump
+#include "overworld_gravestones.h"
 // Tile collision detection for both overworld and dungeon contexts
 #include "tile_detect.h"
 // Player state, movement, and item interaction
@@ -7043,10 +7045,10 @@ void Ancilla41_WaterfallSplash(int k) {  // 88ecaf
   }
 }
 
-// Ancilla type 0x24: Gravestone pusher — the large gravestone tile drawn over
-// Link while he pushes a gravestone. Draws a 2×2 tile grid (tiles 0xC8/0xD8,
-// each 16×8 px, in region B so it renders behind Link). The four OAM entries
-// are laid out in a 32×16 px rectangle (2 tiles wide, 2 tiles tall) using
+// Ancilla type 0x24: Gravestone pusher - the large gravestone tile drawn over
+// Link while he pushes a gravestone. Draws a 2x2 tile grid (tiles 0xC8/0xD8,
+// each 16x8 px, in region B so it renders behind Link). The four OAM entries
+// are laid out in a 32x16 px rectangle (2 tiles wide, 2 tiles tall) using
 // palette 0x3D (slot 5 priority 3). Persists as long as the gravestone
 // push submodule is active; freed externally by the push state machine.
 void Ancilla24_Gravestone(int k) {  // 88ee01
@@ -7623,7 +7625,7 @@ OamEnt *HitStars_UpdateOamBufferPosition(OamEnt *oam) {  // 88fa00
 // Returns true if the hookshot head (ancilla k) is outside the tile-collision
 // region and tile checks should be skipped. On the overworld this means the
 // head has scrolled past the current area's tile-data boundary in the travel
-// direction (using kOverworld_OffsetBaseX/Y and overworld_right_bottom_bound).
+// direction (using separate vertical and horizontal expanded-area bounds).
 // In a dungeon it means the head is in a different 0x200-px page from Link
 // (bit 9 of the coordinate differs) or is within 4 px of the page boundary —
 // both conditions where tile indexing would be unreliable.
@@ -7635,7 +7637,7 @@ bool Hookshot_ShouldIEvenBotherWithTiles(int k) {  // 88fa2d
       return (t < 4) || (t >= overworld_right_bottom_bound_for_scroll);
     } else {
       uint16 t = x - kOverworld_OffsetBaseX[BYTE(current_area_of_player) >> 1];
-      return (t < 6) || (t >= overworld_right_bottom_bound_for_scroll);
+      return (t < 6) || (t >= overworld_right_bound_for_scroll);
     }
   }
   if (!(ancilla_dir[k] & 2)) {
@@ -8918,58 +8920,26 @@ bool AncillaAdd_Splash(uint8 a, uint8 y) {  // 8998fc
 }
 
 // Spawns the gravestone-push ancilla (type ain, limit yin) for the overworld
-// graveyard secret passages. Implements the following logic:
-// 1. Snap Link's Y to the nearest 16-px grid row and look it up in
-//    kMoveGravestone_Y (8 hard-coded row world-Y values). If not found,
-//    cancel (the wrong row was entered).
-// 2. Scan kMoveGravestone_X for a gravestone whose X range covers Link's
-//    X coordinate. kMoveGravestone_Idx[i..i+1] bounds the search to the
-//    gravestones on that row.
-// 3. Special-case gravestone j == 13: requires link_is_running; all others
-//    require NOT running (walk into them).
-// 4. On match: write the gravestone's tile address into big_rock_starting_address
-//    and door_open_closed_counter (animation length). Two special lengths
-//    (0x58 = tombstone 14, 0x38 = tombstone 13) also mark the overworld event
-//    bit (save_ow_event_info[screen] |= 0x20) and play SFX 0x1B (stone grind).
-//    Gravestone tile map coordinates are packed into door_debris_y/x[k].
-//    Calls Overworld_DoMapUpdate32x32_B to commit the tile-map change.
-//    Sets bitmask_of_dragstate = 4 and link_something_with_hookshot = 1 to
-//    trigger the "being dragged" movement mode while the stone slides.
-//    Positions the ancilla at (X, Y-2) using kMoveGravestone_Y1/X1, and saves
-//    the target Y in ancilla_A/B[k] for the push animation.
+// graveyard secret passages. ZScream's gravestone patch scans every editable
+// grave position directly, so moved graves still collide without rebuilding the
+// old row-bucket helper tables.
 void AncillaAdd_GraveStone(uint8 ain, uint8 yin) {  // 8999e9
-  static const uint16 kMoveGravestone_Y[8] = {0x550, 0x540, 0x530, 0x520, 0x500, 0x4e0, 0x4c0, 0x4b0};
-  static const uint16 kMoveGravestone_X[15] = {0x8b0, 0x8f0, 0x910, 0x950, 0x970, 0x9a0, 0x850, 0x870, 0x8b0, 0x8f0, 0x920, 0x950, 0x880, 0x990, 0x840};
-  static const uint16 kMoveGravestone_Y1[15] = {0x540, 0x530, 0x530, 0x530, 0x520, 0x520, 0x510, 0x510, 0x4f0, 0x4f0, 0x4f0, 0x4f0, 0x4d0, 0x4b0, 0x4a0};
-  static const uint16 kMoveGravestone_X1[15] = {0x8b0, 0x8f0, 0x910, 0x950, 0x970, 0x9a0, 0x850, 0x870, 0x8b0, 0x8f0, 0x920, 0x950, 0x880, 0x990, 0x840};
-  static const uint16 kMoveGravestone_Pos[15] = {0xa16, 0x99e, 0x9a2, 0x9aa, 0x92e, 0x934, 0x88a, 0x88e, 0x796, 0x79e, 0x7a4, 0x7aa, 0x690, 0x5b2, 0x508};
-  static const uint8 kMoveGravestone_Ctr[15] = {0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x38, 0x58};
-  static const uint8 kMoveGravestone_Idx[9] = {0, 1, 4, 6, 8, 12, 13, 14, 15};
-
   int k = Ancilla_AddAncilla(ain, yin);
   if (k < 0)
     return;
-  int t = ((link_y_coord & 0xf) < 7 ? link_y_coord : link_y_coord + 16) & ~0xf;
+  int link_y = ((link_y_coord & 0xf) < 7 ? link_y_coord : link_y_coord + 16) & ~0xf;
 
-  int i = 7;
-  while (kMoveGravestone_Y[i] != t) {
-    if (--i < 0) {
-      ancilla_type[k] = 0;
-      return;
-    }
-  }
-
-  int j = kMoveGravestone_Idx[i];
-  int end = kMoveGravestone_Idx[i + 1];
-  do {
-    int x = kMoveGravestone_X[j];
-    if (x < link_x_coord && (uint16)(x + 15) >= link_x_coord) {
-      if (j == 13 ? !link_is_running : link_is_running)
+  for (int j = kOverworldGravestoneCount - 1; j >= 0; j--) {
+    if (kGeneratedOverworldGravestoneY[j] == link_y - 16) {
+      int x = kGeneratedOverworldGravestoneX[j];
+      if (x >= link_x_coord || (uint16)(x + 15) < link_x_coord)
+        continue;
+      if (j == kOverworldGravestoneStairsIndex ? !link_is_running : link_is_running)
         break;
 
-      int pos = kMoveGravestone_Pos[j];
+      int pos = kGeneratedOverworldGravestoneTilemapPos[j];
       big_rock_starting_address = pos;
-      door_open_closed_counter = kMoveGravestone_Ctr[j];
+      door_open_closed_counter = kOverworldGravestoneCounter[j];
       if (door_open_closed_counter == 0x58) {
         sound_effect_2 = Link_CalculateSfxPan() | 0x1b;
       } else if (door_open_closed_counter == 0x38) {
@@ -8985,8 +8955,8 @@ void AncillaAdd_GraveStone(uint8 ain, uint8 yin) {  // 8999e9
       if ((sound_effect_2 & 0x3f) != 0x1b)
         sound_effect_1 = Link_CalculateSfxPan() | 0x22;
 
-      int yy = kMoveGravestone_Y1[j];
-      int xx = kMoveGravestone_X1[j];
+      int yy = kGeneratedOverworldGravestoneY[j];
+      int xx = kGeneratedOverworldGravestoneX[j];
       bitmask_of_dragstate = 4;
       link_something_with_hookshot = 1;
       ancilla_A[k] = (yy - 18);
@@ -8994,7 +8964,7 @@ void AncillaAdd_GraveStone(uint8 ain, uint8 yin) {  // 8999e9
       Ancilla_SetXY(k, xx, yy - 2);
       return;
     }
-  } while (++j != end);
+  }
   ancilla_type[k] = 0;
 }
 

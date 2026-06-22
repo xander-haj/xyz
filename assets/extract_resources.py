@@ -22,10 +22,12 @@
 #   map32_to_map16.txt          — overworld 32x32-to-16x16 tile mapping table
 #   sound/                      — extracted music and SFX data
 #   img/                        — extracted sprite sheet PNGs
+#   editing/special/            - --special rendered special-overworld PNGs
 # =============================================================================
 
 # Standard library imports
 from ast import literal_eval as make_tuple
+import argparse
 import sys
 import os
 
@@ -43,6 +45,11 @@ import yaml
 import extract_music
 # sprite_sheets: decodes and exports Link's sprites, enemy sheets, HUD icons, and fonts as PNGs
 import sprite_sheets
+# special_area_images: renders special-overworld scenes as in-game playfield PNGs
+import special_area_images
+# overworld_map32: writes editable terrain grid sources from ROM map32 streams
+import overworld_map32
+import overworld_static_overlays
 
 # Extracts the overworld map32-to-map16 tile mapping table and writes it as text.
 # The SNES overworld is built from 32x32 pixel metatiles, each composed of four 16x16 tiles.
@@ -249,8 +256,8 @@ def get_hole_infos():
 # Gathers: header metadata (name, size, gfx set, palette, sign text, music/ambient),
 # travel points, entrances, holes, exits, items/secrets, and sprites for each game phase.
 # Light World areas (0-63) have 3 sprite phases (beginning, after Zelda rescue, after
-# Master Sword); Dark World areas (64-143) have a single sprite set.
-# Special areas (144-159) are used internally and have minimal data.
+# Master Sword); Dark World and special areas (64-159) expose one shared sprite set.
+# Areas 144-159 have no vanilla pointer rows here, so they get explicit empty lists.
 # Writes output to: overworld/overworld-N.yaml
 # Parameters:
 #   overworld_area — area index (0-159)
@@ -320,12 +327,13 @@ def print_overworld_area(overworld_area):
     y['Holes'] = hole_infos[overworld_area]
   y['Exits'] = get_exit_datas().get(overworld_area, [])
   y['Items'] = get_items()
+  y['Overlays'] = overworld_static_overlays.rom_static_overlay_infos().get(overworld_area, [])
   
   def decode_sprites(base_addr):
     r = []
     ea = 0x890000 + get_word(base_addr + overworld_area * 2)
     while get_byte(ea) != 0xff:
-      y, x, w = get_byte(ea), get_byte(ea+1), get_byte(ea+2)
+      y, x, w = get_byte(ea) & 0x3f, get_byte(ea+1) & 0x3f, get_byte(ea+2)
       r.append([x, y, tables.kSpriteNames[w]])
       ea += 3
     return r
@@ -354,6 +362,11 @@ def print_overworld_area(overworld_area):
     y['Sprites'] = {
       'info' : get_info(2),
       'sprites' : decode_sprites(0x89CA21)
+    }
+  else:
+    y['Sprites'] = {
+      'info' : get_info(2),
+      'sprites' : []
     }
     
   s = yaml.dump(y, default_flow_style=None, sort_keys=False)
@@ -837,6 +850,7 @@ def print_overlay_rooms():
 def make_directories():
   os.makedirs('img', exist_ok=True)
   os.makedirs('overworld', exist_ok=True)
+  os.makedirs('overworld_maps', exist_ok=True)
   os.makedirs('dungeon', exist_ok=True)
   os.makedirs('sound', exist_ok=True)
 
@@ -847,6 +861,7 @@ def make_directories():
 # Returns: none (delegates to individual extraction functions)
 def print_all_text_stuff():
   print_all_overworld_areas()
+  overworld_map32.write_base_maps_from_rom('overworld_maps', util.ROM)
   print_all_dungeon_rooms()
   print_overlay_rooms()
   print_default_rooms()
@@ -871,9 +886,24 @@ def main():
   sprite_sheets.decode_hud_icons()
   sprite_sheets.decode_font()
 
-# Script entry point: load the ROM (from command-line arg or default path),
-# then run the full extraction pipeline
+# Parses command-line arguments for full or special-only extraction.
+# Parameters:
+#   argv - command-line arguments without the program name
+# Returns: argparse.Namespace with optional ROM path and extraction switches
+def parse_args(argv):
+  parser = argparse.ArgumentParser(description = 'Extract Zelda 3 editable resources from a ROM.')
+  parser.add_argument('rom', nargs = '?', help = 'Optional ROM path. Defaults to util.load_rom auto-detection.')
+  parser.add_argument('--special', action = 'store_true', help = 'Render special-overworld PNGs to editing/special/.')
+  return parser.parse_args(argv)
+
+# Script entry point: load the ROM, then run either the full extraction
+# pipeline or the special-overworld PNG renderer.
 if __name__ == "__main__":
-  util.load_rom(sys.argv[1] if len(sys.argv) >= 2 else None)
-  main()
+  args = parse_args(sys.argv[1:])
+  util.load_rom(args.rom)
+  if args.special:
+    paths = special_area_images.extract_special_area_images()
+    print('Wrote %d special area PNGs to %s' % (len(paths), special_area_images.OUTPUT_DIR))
+  else:
+    main()
 

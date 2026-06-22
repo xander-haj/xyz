@@ -161,6 +161,7 @@ void Do3To4High(uint16 *vram_ptr, const uint8 *decomp_addr);
 void Do3To4Low(uint16 *vram_ptr, const uint8 *decomp_addr);
 // Loads sprite graphics pack into VRAM at the specified address
 void LoadSpriteGraphics(uint16 *vram_ptr, int gfx_pack, uint8 *decomp_addr);
+void LoadOverworldSpriteCustomContext(uint16 *tiles, uint16 *colors, uint8 gfx, uint8 palette, bool dark_world);
 // Loads BG graphics pack into VRAM; slot determines the tileset slot
 void LoadBackgroundGraphics(uint16 *vram_ptr, int gfx_pack, int slot, uint8 *decomp_addr);
 // Loads the common sprite tiles shared across all areas (Link, HUD icons)

@@ -1423,6 +1423,57 @@ void LoadSpriteGraphics(uint16 *vram_ptr, int gfx_pack, uint8 *decomp_addr) {  /
     Do3To4Low(vram_ptr, decomp_addr);
 }
 
+static void SpriteCustom_CopyPaletteRow(uint16 *colors, const uint16 *src, int dst_byte, int x_ents) {
+  memcpy(&colors[(dst_byte >> 1) - 0x80], src, sizeof(uint16) * (x_ents + 1));
+}
+
+static void SpriteCustom_CopyPaletteRows(uint16 *colors, const uint16 *src,
+                                         int dst_byte, int x_ents, int y_pals) {
+  int width = x_ents + 1;
+  do {
+    SpriteCustom_CopyPaletteRow(colors, src, dst_byte, x_ents);
+    src += width;
+    dst_byte += 32;
+  } while (--y_pals >= 0);
+}
+
+static int SpriteCustom_InheritedAuxPaletteRow(int slot) {
+  for (int i = slot; i < countof(kOwSprPalInfo); i += 2) {
+    if (kOwSprPalInfo[i] >= 0)
+      return kOwSprPalInfo[i];
+  }
+  return 0;
+}
+
+void LoadOverworldSpriteCustomContext(uint16 *tiles, uint16 *colors,
+                                      uint8 gfx, uint8 palette, bool dark_world) {
+  uint8 packs[4] = {70, 70, 70, 70};
+  const uint8 *row = gfx < countof(kSpriteTilesets) ? kSpriteTilesets[gfx] : kSpriteTilesets[0];
+  for (int i = 0; i < 4; i++) {
+    if (row[i])
+      packs[i] = row[i];
+  }
+
+  Do3To4High(&tiles[0x0000], GetCompSpritePtr(0));
+  Do3To4High(&tiles[0x0400], GetCompSpritePtr(kVariousPacks[6 + (dark_world ? 8 : 0)]));
+  Do3To4Low(&tiles[0x0800], GetCompSpritePtr(6));
+  Do3To4Low(&tiles[0x0c00], GetCompSpritePtr(7));
+  for (int i = 0; i < 4; i++)
+    LoadSpriteGraphics(&tiles[0x1000 + i * 0x400], packs[i], &g_ram[0x14000]);
+
+  memset(colors, 0, sizeof(uint16) * 0x80);
+  SpriteCustom_CopyPaletteRow(colors, kPalette_SpriteAux3 + (dark_world ? 3 : 1) * 7, 0x102, 6);
+  SpriteCustom_CopyPaletteRow(colors, kPalette_MiscSprite_Indoors + (dark_world ? 9 : 7) * 7, 0x112, 6);
+  SpriteCustom_CopyPaletteRows(colors, kPalette_MainSpr + (dark_world ? 60 : 0), 0x122, 14, 3);
+
+  const int8 *d = palette < countof(kOwSprPalInfo) / 2 ? kOwSprPalInfo + palette * 2 : kOwSprPalInfo;
+  int sp5l = d[0] >= 0 ? d[0] : SpriteCustom_InheritedAuxPaletteRow(0);
+  int sp6l = d[1] >= 0 ? d[1] : SpriteCustom_InheritedAuxPaletteRow(1);
+  SpriteCustom_CopyPaletteRow(colors, kPalette_SpriteAux1 + sp5l * 7, 0x1a2, 6);
+  SpriteCustom_CopyPaletteRow(colors, kPalette_SpriteAux1 + sp6l * 7, 0x1c2, 6);
+  SpriteCustom_CopyPaletteRow(colors, kPalette_MiscSprite_Indoors + (dark_world ? 8 : 6) * 7, 0x1d2, 6);
+}
+
 /*
  * BG-tile counterpart to LoadSpriteGraphics. Decompresses BG-pack
  * `gfx_pack` and uploads it to VRAM at `vram_ptr`. The expander choice

@@ -32,6 +32,7 @@
 import sys
 import text_compression
 import util
+import json
 from PIL import Image
 import yaml
 import tables
@@ -41,6 +42,70 @@ from util import cache
 import sprite_sheets
 import argparse
 import os
+import overworld_map32
+import overworld_static_overlays
+
+SPECIAL_EXIT_ROOM_MIN = 0x180
+SPECIAL_EXIT_ROOM_MAX = 0x18F
+SPECIAL_EXIT_BYTE_FIELDS = ('spr_gfx', 'aux_gfx', 'pal_bg', 'pal_spr')
+SPECIAL_EXIT_WORD_FIELDS = ('top', 'bottom', 'left', 'right', 'left_edge_of_map')
+SPECIAL_EXIT_INT16_FIELDS = ('unk4', 'unk5', 'unk6', 'unk7')
+OW_BIRD_TRAVEL_SLOTS = 9
+OW_WHIRLPOOL_SLOTS = 8
+OW_TRAVEL_SLOTS = OW_BIRD_TRAVEL_SLOTS + OW_WHIRLPOOL_SLOTS
+OW_ENTRANCE_SLOTS = 129
+OW_HOLE_SLOTS = 0x13
+OW_EXIT_SLOTS = 0x4F
+OW_NAV_GRID_MAX = 0x3F
+OW_HOLE_Y_MIN = 8
+OW_EXIT_DOOR_TYPES = ('wooden', 'bombable', 'sanctuary', 'palace')
+OW_HEADER_GFX_AREAS = 128
+OW_HEADER_PALETTE_AREAS = 128
+OW_HEADER_SIGN_TEXT_AREAS = 128
+OW_HEADER_LIGHT_TAGS = ('beginning', 'zelda', 'sword', 'agahnim')
+OW_HEADER_SHARED_TAGS = ('agahnim',)
+OW_SPECIAL_AREA_ROOMS = {
+  0x81: 0x182,
+  0x82: 0x182,
+  0x88: 0x189,
+  0x89: 0x182,
+  0x8a: 0x182,
+  0x93: 0x189,
+  0x94: 0x181,
+  0x97: 0x180,
+}
+OW_AREA_COUNT = 160
+OW_NORMAL_AREA_COUNT = 128
+OW_AREA_TOPOLOGY_STRIDE = 192
+OW_AREA_SIZE_OFFSET = OW_AREA_TOPOLOGY_STRIDE
+OW_AREA_PARENT_OFFSET = OW_AREA_TOPOLOGY_STRIDE * 2
+OW_AREA_TOPOLOGY_ASSET_SIZE = OW_AREA_TOPOLOGY_STRIDE * 3
+OW_STATIC_OVERLAY_OFFSET_TABLE = OW_AREA_TOPOLOGY_ASSET_SIZE
+OW_STATIC_OVERLAY_DATA_OFFSET = OW_STATIC_OVERLAY_OFFSET_TABLE + OW_AREA_COUNT * 2
+OW_AREA_SIZE_CODES = {
+  'small': 0,
+  'big': 1,
+  'large': 1,
+  'wide': 2,
+  'tall': 3,
+}
+OW_AREA_SIZE_NAMES = {
+  0: 'small',
+  1: 'big',
+  2: 'wide',
+  3: 'tall',
+}
+OW_AREA_SIZE_OFFSETS = {
+  'small': (0,),
+  'big': (0, 1, 8, 9),
+  'wide': (0, 1),
+  'tall': (0, 8),
+}
+OW_PALETTE_WORD_COUNTS = {
+  'overworld_bg_main': 210,
+  'overworld_bg_aux12': 420,
+  'overworld_bg_aux3': 98,
+}
 
 # Flatten a list of lists into a single flat list.
 # Used when multiple entrance/starting-point records each produce a list of values
@@ -101,10 +166,10 @@ def add_asset_packed(name, data):
 # and packs them into four separate uint8 arrays, one per quadrant corner.
 # The packing interleaves groups of 4 map32 entries and splits each 10-bit
 # map16 index into low-byte and high-nibble parts for compact storage.
-def print_map32_to_map16():
+def print_map32_to_map16(source_path = 'map32_to_map16.txt'):
   # Parse the text file into a dict: map32_index -> [map16_TL, map16_TR, map16_BL, map16_BR]
   tab = {}
-  for line in open('map32_to_map16.txt'):
+  for line in open(source_path):
     line = line.strip()
     x, xs = line.split(':', 1)
     tab[int(x)] = [int(t) for t in xs.split(',')]
@@ -229,8 +294,12 @@ def print_images(args):
   # Compile all background tileset sheets (always from ROM, always LZ-compressed)
   all = []
   for i in range(len(tables.kCompBgPtrs)):
-    decomp, comp_len = util.decomp(tables.kCompBgPtrs[i], ROM.get_byte, False, True)
-    all.append(bytes(ROM.get_bytes(tables.kCompBgPtrs[i], comp_len)))
+    generated = read_generated_bytes(args, 'gfx', 'bg', '%03d.bin' % i)
+    if generated is not None:
+      all.append(generated)
+    else:
+      decomp, comp_len = util.decomp(tables.kCompBgPtrs[i], ROM.get_byte, False, True)
+      all.append(bytes(ROM.get_bytes(tables.kCompBgPtrs[i], comp_len)))
   add_asset_packed('kBgGfx', all)
 
 def print_dialogue(args):
@@ -243,7 +312,8 @@ def print_dialogue(args):
         raise Exception(f'Language {a} is not valid')
       name = dialogue_filename(a)
       if not os.path.exists(name):
-        raise Exception(f'{name} not found. You need to extract it with --extract-dialogue using the ROM of that language.')
+        raise Exception(
+          f'{name} not found. You need to extract it with --extract-dialogue using the ROM of that language.')
       languages.append(a)
 
   all_langs, all_fonts, mappings = [], [], []
@@ -267,7 +337,9 @@ def print_misc(args):
 
   add_asset_uint16('kPredefinedTileData', ROM.get_words(0x9B52, 6438))
 
-  add_asset_uint16('kMap16ToMap8', ROM.get_words(0x8f8000, 3752 * 4))
+  add_asset_uint16('kMap16ToMap8',
+                   read_generated_words(args, ('tables', 'map16_to_map8.json'),
+                                        ROM.get_words(0x8f8000, 3752 * 4)))
 
   add_asset_uint8('kGeneratedWishPondItem', ROM.get_bytes(0x888450, 256))
   add_asset_uint8('kGeneratedBombosArr', ROM.get_bytes(0x8890FC, 256))
@@ -290,20 +362,539 @@ def print_misc(args):
   add_asset_uint16('kPalette_MiscSprite_Indoors', ROM.get_words(0x9BD446, 77))
   add_asset_uint16('kPalette_SpriteAux1', ROM.get_words(0x9BD4E0, 168))
 
-  add_asset_uint16('kPalette_OverworldBgMain', ROM.get_words(0x9BE6C8, 210))
-  add_asset_uint16('kPalette_OverworldBgAux12', ROM.get_words(0x9BE86C, 420))
-  add_asset_uint16('kPalette_OverworldBgAux3', ROM.get_words(0x9BE604, 98))
+  add_asset_uint16('kPalette_OverworldBgMain',
+                   read_generated_palette_words(args, 'overworld_bg_main',
+                                                ROM.get_words(0x9BE6C8, 210)))
+  add_asset_uint16('kPalette_OverworldBgAux12',
+                   read_generated_palette_words(args, 'overworld_bg_aux12',
+                                                ROM.get_words(0x9BE86C, 420)))
+  add_asset_uint16('kPalette_OverworldBgAux3',
+                   read_generated_palette_words(args, 'overworld_bg_aux3',
+                                                ROM.get_words(0x9BE604, 98)))
   add_asset_uint16('kPalette_PalaceMapBg', ROM.get_words(0x9BE544, 96))
   add_asset_uint16('kPalette_PalaceMapSpr', ROM.get_words(0x9BD70A, 21))
   add_asset_uint16('kHudPalData', ROM.get_words(0x9BD660, 64))
 
   add_asset_uint16('kOverworldMapPaletteData', ROM.get_words(0x8ADB27, 256))
 
-@cache
-def load_overworld_yaml(room):
+# Load overworld YAML from generated mod output when present, otherwise base assets.
+def load_overworld_yaml(room, args):
+  root = getattr(args, 'overworld_generated_root', None)
+  if root:
+    generated = os.path.join(root, 'overworld', 'overworld-%d.yaml' % room)
+    if os.path.exists(generated):
+      return yaml.safe_load(open(generated, 'r'))
   return yaml.safe_load(open('overworld/overworld-%d.yaml' % room, 'r'))
+
+
+def overworld_yaml_path(room, args):
+  root = getattr(args, 'overworld_generated_root', None)
+  if root:
+    generated = os.path.join(root, 'overworld', 'overworld-%d.yaml' % room)
+    if os.path.exists(generated):
+      return generated
+  base = os.path.join('overworld', 'overworld-%d.yaml' % room)
+  return base if os.path.exists(base) else None
+
+
+def load_existing_overworld_yamls(args):
+  return {
+    area: load_overworld_yaml(area, args)
+    for area in range(OW_AREA_COUNT)
+    if overworld_yaml_path(area, args)
+  }
+
+
+def canonical_overworld_area_size(area, value):
+  if value not in OW_AREA_SIZE_CODES:
+    raise ValueError(
+      "Overworld Header.size in area %d must be small, big, wide, or tall." % area)
+  return OW_AREA_SIZE_NAMES[OW_AREA_SIZE_CODES[value]]
+
+
+def overworld_size_spans_x(size):
+  return size in ('big', 'wide')
+
+
+def overworld_size_spans_y(size):
+  return size in ('big', 'tall')
+
+
+def overworld_coord_limits(header):
+  size = header.get('size')
+  return {
+    'x': 63 if overworld_size_spans_x(size) else 31,
+    'y': 63 if overworld_size_spans_y(size) else 31,
+  }
+
+
+def build_overworld_topology(area_data):
+  parents = list(range(OW_AREA_TOPOLOGY_STRIDE))
+  sizes = [0] * OW_AREA_TOPOLOGY_STRIDE
+  children = {area: [area] for area in range(OW_AREA_COUNT)}
+
+  for world_base in (0, 64):
+    covered = {}
+    for y in range(8):
+      for x in range(8):
+        area = world_base + y * 8 + x
+        if area in covered:
+          continue
+        data = area_data.get(area)
+        if data is None:
+          raise ValueError("Missing overworld YAML for generated area head %d." % area)
+        header = data.get('Header', {})
+        size = canonical_overworld_area_size(area, header.get('size'))
+        header['size'] = size
+        validate_overworld_topology_fit(area, x, y, size)
+        owned = []
+        for offset in OW_AREA_SIZE_OFFSETS[size]:
+          child = area + offset
+          if child in covered:
+            raise ValueError("Overworld area %d is covered by both %d and %d." % (
+              child, covered[child], area))
+          if offset and child in area_data:
+            raise ValueError(
+              "Overworld child area %d has YAML but is owned by parent area %d." % (
+                child, area))
+          covered[child] = area
+          parents[child] = area
+          sizes[child] = OW_AREA_SIZE_CODES[size]
+          owned.append(child)
+        children[area] = owned
+
+  for area in range(128, OW_AREA_COUNT):
+    data = area_data.get(area)
+    if data is None:
+      raise ValueError("Missing overworld YAML for special area %d." % area)
+    header = data.get('Header', {})
+    size = canonical_overworld_area_size(area, header.get('size'))
+    header['size'] = size
+    parents[area] = area
+    sizes[area] = OW_AREA_SIZE_CODES[size]
+    children[area] = [area]
+
+  return {
+    'parents': parents,
+    'sizes': sizes,
+    'children': children,
+    'heads': [area for area in range(OW_AREA_COUNT) if parents[area] == area],
+  }
+
+
+# Build a slot-indexed view of kSpExit payloads from clean YAML exit records.
+def special_exit_payloads_by_slot(area_data):
+  slots = {}
+  for data in (entry for entry in area_data.values() if entry is not None):
+    for row in data.get('Exits', []):
+      room = row.get('room')
+      if room is None or 'special_exit' not in row:
+        continue
+      if SPECIAL_EXIT_ROOM_MIN <= room <= SPECIAL_EXIT_ROOM_MAX:
+        slots[room - SPECIAL_EXIT_ROOM_MIN] = row['special_exit']
+  return slots
+
+
+# Resolve the special-exit slot that owns one special map's visual context.
+def special_area_slot(area, area_data):
+  if area < OW_NORMAL_AREA_COUNT:
+    return None
+  for row in (area_data.get(area) or {}).get('Exits', []):
+    room = row.get('room')
+    if room is not None and SPECIAL_EXIT_ROOM_MIN <= room <= SPECIAL_EXIT_ROOM_MAX:
+      if 'special_exit' in row:
+        return room - SPECIAL_EXIT_ROOM_MIN
+  room = OW_SPECIAL_AREA_ROOMS.get(area)
+  if room is not None:
+    return room - SPECIAL_EXIT_ROOM_MIN
+  return None
+
+
+# Derive the generated 160-entry BG palette assignment table without reading $04C635.
+def overworld_bg_palette_value(area, data, area_data, special_slots):
+  header = data['Header']
+  palette = header.get('palette', -1)
+  if area < OW_HEADER_PALETTE_AREAS and palette >= 0:
+    return palette
+  slot = special_area_slot(area, area_data)
+  if slot is not None and slot in special_slots:
+    return special_slots[slot]['pal_bg']
+  if palette >= 0:
+    return palette
+  return 0
+
+
+def validate_overworld_topology_fit(area, x, y, size):
+  if overworld_size_spans_x(size) and x >= 7:
+    raise ValueError("Overworld Header.size %s in area %d crosses the east world edge." % (
+      size, area))
+  if overworld_size_spans_y(size) and y >= 7:
+    raise ValueError("Overworld Header.size %s in area %d crosses the south world edge." % (
+      size, area))
+
+
+def validate_special_exit_payload(area, exit_index, room, payload, seen_rooms):
+  special_room = SPECIAL_EXIT_ROOM_MIN <= room <= SPECIAL_EXIT_ROOM_MAX
+  if payload is None:
+    if special_room:
+      raise ValueError("Exit %d in area %d room 0x%03X needs special_exit." % (
+        exit_index, area, room))
+    return
+  if not special_room:
+    raise ValueError("Exit %d in area %d has special_exit for non-special room 0x%03X." % (
+      exit_index, area, room))
+  if room in seen_rooms:
+    other_area, other_exit = seen_rooms[room]
+    raise ValueError(
+      "Special exit room 0x%03X is duplicated by area %d exit %d and area %d exit %d." % (
+        room, other_area, other_exit, area, exit_index))
+  seen_rooms[room] = (area, exit_index)
+  if not isinstance(payload, dict):
+    raise ValueError("Exit %d in area %d special_exit must be an object." % (exit_index, area))
+  validate_special_exit_field(area, exit_index, payload, 'dir', 0, 3)
+  for key in SPECIAL_EXIT_BYTE_FIELDS:
+    validate_special_exit_field(area, exit_index, payload, key, 0, 0xFF)
+  for key in SPECIAL_EXIT_WORD_FIELDS:
+    validate_special_exit_field(area, exit_index, payload, key, 0, 0xFFFF)
+  for key in SPECIAL_EXIT_INT16_FIELDS:
+    validate_special_exit_field(area, exit_index, payload, key, -0x8000, 0x7FFF)
+
+
+def validate_special_exit_field(area, exit_index, payload, key, minimum, maximum):
+  if key not in payload:
+    raise ValueError("Exit %d in area %d special_exit is missing %s." % (exit_index, area, key))
+  value = payload[key]
+  if not isinstance(value, int) or value < minimum or value > maximum:
+    raise ValueError("Exit %d in area %d special_exit.%s must be %d..%d." % (
+      exit_index, area, key, minimum, maximum))
+
+
+# Return one optional navigation list after confirming hand-authored YAML kept a list shape.
+def overworld_navigation_rows(area, area_data, key):
+  if key not in area_data:
+    return []
+  rows = area_data[key]
+  if not isinstance(rows, list):
+    raise ValueError("Overworld %s in area %d must be a list." % (key, area))
+  return rows
+
+
+# Validate one integer field before it is packed into fixed-size ROM navigation tables.
+def validate_overworld_nav_field(area, row_index, table, row, key, minimum, maximum):
+  if key not in row:
+    raise ValueError("Overworld %s area %d row %d is missing %s." % (
+      table, area, row_index, key))
+  return validate_overworld_nav_int(
+    area, row_index, "%s.%s" % (table, key), row[key], minimum, maximum)
+
+
+# Validate one integer value, optionally checking the valid ROM table range.
+def validate_overworld_nav_int(area, row_index, label, value, minimum=None, maximum=None):
+  if isinstance(value, bool) or not isinstance(value, int):
+    raise ValueError("Overworld %s in area %d row %d must be an integer." % (
+      label, area, row_index))
+  if minimum is not None and value < minimum:
+    raise ValueError("Overworld %s in area %d row %d must be %d..%d." % (
+      label, area, row_index, minimum, maximum))
+  if maximum is not None and value > maximum:
+    raise ValueError("Overworld %s in area %d row %d must be %d..%d." % (
+      label, area, row_index, minimum, maximum))
+  return value
+
+
+# Validate a two-integer field shared by travel and exit destination records.
+def validate_overworld_nav_pair(area, row_index, table, row, key, minimum=None, maximum=None):
+  if key not in row:
+    raise ValueError("Overworld %s area %d row %d is missing %s." % (
+      table, area, row_index, key))
+  value = row[key]
+  if not isinstance(value, list) or len(value) != 2:
+    raise ValueError("Overworld %s.%s in area %d row %d must be a two-number list." % (
+      table, key, area, row_index))
+  x = validate_overworld_nav_int(
+    area, row_index, "%s.%s[0]" % (table, key), value[0], minimum, maximum)
+  y = validate_overworld_nav_int(
+    area, row_index, "%s.%s[1]" % (table, key), value[1], minimum, maximum)
+  return x, y
+
+
+# Validate an area-relative coordinate pair after applying the compiler's area origin.
+def validate_overworld_relative_nav_pair(area, row_index, table, row, key):
+  x, y = validate_overworld_nav_pair(area, row_index, table, row, key)
+  base_x, base_y = (area & 7) << 9, (area & 56) << 6
+  validate_overworld_nav_int(
+    area, row_index, "%s.%s[0] compiled" % (table, key), x + base_x, 0, 0xFFFF)
+  validate_overworld_nav_int(
+    area, row_index, "%s.%s[1] compiled" % (table, key), y + base_y, 0, 0xFFFF)
+  return x, y
+
+
+# Validate the full coordinate/state payload shared by Travel and Exits rows.
+def validate_overworld_destination_fields(area, row_index, table, row):
+  for key in ('xy', 'scroll_xy', 'camera_xy'):
+    validate_overworld_relative_nav_pair(area, row_index, table, row, key)
+  validate_overworld_nav_pair(area, row_index, table, row, 'load_xy', 0, OW_NAV_GRID_MAX)
+  validate_overworld_nav_pair(area, row_index, table, row, 'unk', -0x80, 0x7F)
+
+
+# Validate one kBirdTravel_* row and return its fixed slot identity.
+def validate_overworld_travel_row(area, row_index, row, seen_bird_slots, seen_whirlpools):
+  if not isinstance(row, dict):
+    raise ValueError("Overworld Travel area %d row %d must be an object." % (
+      area, row_index))
+  if overworld_deleted_nav_row(area, row_index, 'Travel', row):
+    raise ValueError("Overworld Travel area %d row %d cannot be deleted." % (
+      area, row_index))
+  validate_overworld_destination_fields(area, row_index, 'Travel', row)
+  has_bird_slot = 'bird_travel_id' in row
+  has_whirlpool_source = 'whirlpool_src_area' in row
+  if has_bird_slot == has_whirlpool_source:
+    raise ValueError(
+      "Overworld Travel area %d row %d must define exactly one travel identity." % (
+        area, row_index))
+  if has_bird_slot:
+    slot = validate_overworld_nav_field(
+      area, row_index, 'Travel', row, 'bird_travel_id', 0, OW_BIRD_TRAVEL_SLOTS - 1)
+    require_overworld_unique_slot('bird travel', seen_bird_slots, slot, area, row_index)
+    return slot, None
+  source = validate_overworld_nav_field(
+    area, row_index, 'Travel', row, 'whirlpool_src_area', 0, 0x9F)
+  require_overworld_unique_slot('whirlpool source', seen_whirlpools, source, area, row_index)
+  return None, source
+
+
+# Validate one kOverworld_Entrance_* slot owner and return the packed source fields.
+def validate_overworld_entrance_row(area, row_index, row, seen_slots):
+  if not isinstance(row, dict):
+    raise ValueError("Overworld Entrances area %d row %d must be an object." % (
+      area, row_index))
+  slot = validate_overworld_nav_field(
+    area, row_index, 'Entrances', row, 'index', 0, OW_ENTRANCE_SLOTS - 1)
+  require_overworld_unique_slot('entrance', seen_slots, slot, area, row_index)
+  if overworld_deleted_nav_row(area, row_index, 'Entrances', row):
+    return slot, True, 0, 0, 0
+  x = validate_overworld_nav_field(area, row_index, 'Entrances', row, 'x', 0, OW_NAV_GRID_MAX)
+  y = validate_overworld_nav_field(area, row_index, 'Entrances', row, 'y', 0, OW_NAV_GRID_MAX)
+  entrance_id = validate_overworld_nav_field(
+    area, row_index, 'Entrances', row, 'entrance_id', 0, 0xFF)
+  return slot, False, x, y, entrance_id
+
+
+# Validate one fall-hole source row before the compiler applies the y-8 ROM offset.
+def validate_overworld_hole_row(area, row_index, row, seen_slots):
+  if not isinstance(row, dict):
+    raise ValueError("Overworld Holes area %d row %d must be an object." % (
+      area, row_index))
+  slot = None
+  if 'index' in row:
+    slot = validate_overworld_nav_field(
+      area, row_index, 'Holes', row, 'index', 0, OW_HOLE_SLOTS - 1)
+    require_overworld_unique_slot('fall-hole', seen_slots, slot, area, row_index)
+  if overworld_deleted_nav_row(area, row_index, 'Holes', row):
+    if slot is None:
+      raise ValueError("Overworld Holes area %d row %d deleted rows need index." % (
+        area, row_index))
+    return slot, True, 0, 0, 0
+  x = validate_overworld_nav_field(area, row_index, 'Holes', row, 'x', 0, OW_NAV_GRID_MAX)
+  y = validate_overworld_nav_field(
+    area, row_index, 'Holes', row, 'y', OW_HOLE_Y_MIN, OW_NAV_GRID_MAX)
+  entrance_id = validate_overworld_nav_field(
+    area, row_index, 'Holes', row, 'entrance_id', 0, 0xFF)
+  return slot, False, x, y, entrance_id
+
+
+# Validate one optional Exits[].door tuple before door words are packed.
+def validate_overworld_exit_door(area, row_index, door):
+  if door is None:
+    return
+  if not isinstance(door, list) or len(door) != 3:
+    raise ValueError("Overworld Exits.door in area %d row %d must be [type, x, y]." % (
+      area, row_index))
+  if door[0] not in OW_EXIT_DOOR_TYPES:
+    raise ValueError("Overworld Exits.door type %r in area %d row %d is unsupported." % (
+      door[0], area, row_index))
+  validate_overworld_nav_int(area, row_index, 'Exits.door.x', door[1], 0, OW_NAV_GRID_MAX)
+  validate_overworld_nav_int(area, row_index, 'Exits.door.y', door[2], 0, OW_NAV_GRID_MAX)
+
+
+# Validate one kExitData_* slot owner and return its slot and room identity.
+def validate_overworld_exit_row(area, row_index, row, seen_slots):
+  if not isinstance(row, dict):
+    raise ValueError("Overworld Exits area %d row %d must be an object." % (
+      area, row_index))
+  slot = validate_overworld_nav_field(
+    area, row_index, 'Exits', row, 'index', 0, OW_EXIT_SLOTS - 1)
+  require_overworld_unique_slot('exit', seen_slots, slot, area, row_index)
+  if overworld_deleted_nav_row(area, row_index, 'Exits', row):
+    return slot, True, 0
+  room = validate_overworld_nav_field(area, row_index, 'Exits', row, 'room', 0, 0xFFFF)
+  validate_overworld_destination_fields(area, row_index, 'Exits', row)
+  validate_overworld_exit_door(area, row_index, row.get('door'))
+  return slot, False, room
+
+
+# Return true for a ZScream-style fixed-slot deletion sentinel row.
+def overworld_deleted_nav_row(area, row_index, table, row):
+  if 'deleted' not in row:
+    return False
+  if row['deleted'] is not True:
+    raise ValueError("Overworld %s area %d row %d deleted must be true." % (
+      table, area, row_index))
+  return True
+
+
+# Reject duplicate fixed-slot records before a later asset write can race or assert.
+def require_overworld_unique_slot(label, slots, slot, area, row_index):
+  if slot in slots:
+    other_area, other_row = slots[slot]
+    raise ValueError(
+      "Overworld %s slot %d is duplicated by area %d row %d and area %d row %d." % (
+        label, slot, other_area, other_row, area, row_index))
+  slots[slot] = (area, row_index)
+
+
+# Require every fixed ROM slot to have exactly one YAML owner before asset packing.
+def require_overworld_slots(label, slots, expected_count):
+  expected = set(range(expected_count))
+  actual = set(slots)
+  if actual != expected:
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    raise ValueError("Overworld %s slots must be exactly 0..%d; missing=%s extra=%s." % (
+      label, expected_count - 1, missing, extra))
+
+
+# Return the first unclaimed fixed ROM slot for legacy rows without explicit index.
+def first_free_overworld_slot(slots, expected_count):
+  for slot in range(expected_count):
+    if slot not in slots:
+      return slot
+  raise ValueError("No free overworld fixed navigation slots remain.")
+
+
+# Require fixed-count ROM navigation tables to stay fully populated.
+def require_overworld_count(label, rows, expected_count):
+  actual = len(rows)
+  if actual != expected_count:
+    raise ValueError("Overworld %s rows must total %d, got %d." % (
+      label, expected_count, actual))
+
+
+# Validate one compiler-backed Header field without rejecting ignored special-screen sentinels.
+def validate_overworld_header_field(area, header, key, backed_areas, minimum, maximum):
+  if key not in header:
+    raise ValueError("Overworld Header area %d is missing %s." % (area, key))
+  value = header[key]
+  if area < backed_areas:
+    validate_overworld_nav_int(area, 0, "Header.%s" % key, value, minimum, maximum)
+    return
+  validate_overworld_nav_int(area, 0, "Header.%s" % key, value)
+
+
+# Validate one Header music or ambient map against the fixed local music table shape.
+def validate_overworld_header_tags(area, header, key, names, maximum_code):
+  if key not in header or not isinstance(header[key], dict):
+    raise ValueError("Overworld Header.%s in area %d must be an object." % (key, area))
+  expected = set(OW_HEADER_LIGHT_TAGS if area < 64 else OW_HEADER_SHARED_TAGS)
+  actual = set(header[key])
+  if actual != expected:
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    raise ValueError("Overworld Header.%s area %d tags mismatch; missing=%s extra=%s." % (
+      key, area, missing, extra))
+  for tag in sorted(expected):
+    name = header[key][tag]
+    if name not in names:
+      raise ValueError("Unknown overworld Header.%s.%s name %r in area %d." % (
+        key, tag, name, area))
+    code = names[name]
+    if code < 0 or code > maximum_code:
+      raise ValueError("Overworld Header.%s.%s name %r in area %d is not nibble-sized." % (
+        key, tag, name, area))
+
+
+# Validate one YAML Header before writing the fixed overworld property/music tables.
+def validate_overworld_header(area, header):
+  if not isinstance(header, dict):
+    raise ValueError("Overworld Header in area %d must be an object." % area)
+  header['size'] = canonical_overworld_area_size(area, header.get('size'))
+  validate_overworld_header_field(area, header, 'gfx', OW_HEADER_GFX_AREAS, 0, 0xFF)
+  validate_overworld_header_field(area, header, 'palette', OW_HEADER_PALETTE_AREAS, 0, 0xFF)
+  validate_overworld_header_field(area, header, 'sign_text', OW_HEADER_SIGN_TEXT_AREAS, 0, 0xFFFF)
+  validate_overworld_header_tags(area, header, 'music', tables.kMusicNamesRev, 0x0F)
+  validate_overworld_header_tags(area, header, 'ambient', tables.kAmbientSoundNameRev, 0x0F)
+
+
+def validate_overworld_item_row(area, area_data, row_index, row):
+  if not isinstance(row, list) or len(row) != 3:
+    raise ValueError("Overworld item area %d row %d must be [x, y, name]." % (
+      area, row_index))
+  coord_max = overworld_coord_limits(area_data['Header'])
+  x = validate_overworld_item_coord(area, row_index, 'x', row[0], coord_max['x'])
+  y = validate_overworld_item_coord(area, row_index, 'y', row[1], coord_max['y'])
+  name = row[2]
+  if name not in tables.kSecretNamesRev:
+    raise ValueError("Unknown overworld item name %r in area %d row %d." % (
+      name, area, row_index))
+  return x, y, tables.kSecretNamesRev[name]
+
+
+def validate_overworld_item_coord(area, row_index, key, value, maximum):
+  if isinstance(value, bool) or not isinstance(value, int):
+    raise ValueError("Overworld item %s in area %d row %d must be an integer." % (
+      key, area, row_index))
+  if value < 0 or value > maximum:
+    raise ValueError("Overworld item %s in area %d row %d must be 0..%d." % (
+      key, area, row_index, maximum))
+  return value
+
+
+def compile_static_overlay_blob(area_data, _topology):
+  """Pack YAML Overlays rows into the extended overworld metadata asset tail."""
+  data = [0xff]
+  offsets = [0] * OW_AREA_COUNT
+  interned = {tuple(data): 0}
+
+  def intern(rows):
+    blob = []
+    for row in rows:
+      blob.extend([row['x'], row['y'], row['tile'] & 0xff, row['tile'] >> 8])
+    blob.append(0xff)
+    key = tuple(blob)
+    if key not in interned:
+      interned[key] = len(data)
+      data.extend(blob)
+    return interned[key]
+
+  for area in range(OW_AREA_COUNT):
+    if area not in area_data:
+      continue
+    rows = overworld_static_overlays.normalize_static_overlay_rows(
+      area_data[area].get('Overlays', []), area)
+    offsets[area] = intern(rows)
+
+  tail = []
+  for offset in offsets:
+    tail.extend([offset & 0xff, offset >> 8])
+  tail.extend(data)
+  return tail
     
-def print_overworld():
+# Compile overworld terrain streams from editable map32 grids when they exist.
+# Parameters: none.
+# Returns: nothing; registers the packed high-byte and low-byte stream assets.
+def print_overworld(args):
+  source_dir = getattr(args, 'overworld_source_root', None) or overworld_map32.DEFAULT_SOURCE_DIR
+  if overworld_map32.has_any_source_files(source_dir):
+    high_streams = []
+    low_streams = []
+    for screen, words in enumerate(overworld_map32.load_all_map32_sources(source_dir)):
+      high, low = overworld_map32.encode_word_streams(words, screen)
+      high_streams.append(high)
+      low_streams.append(low)
+    add_asset_packed('kOverworld_Hibytes_Comp', high_streams)
+    add_asset_packed('kOverworld_Lobytes_Comp', low_streams)
+    return
+
   r = []
   for i in range(160):
     addr = ROM.get_24(0x82F94D + i * 3)
@@ -320,6 +911,195 @@ def print_overworld():
 
 def is_area_head(i):
   return i >= 128 or ROM.get_byte(0x82A5EC + (i & 63)) == (i & 63)
+
+
+# Locate one generated mod output file when restool/modtool requested modded assets.
+def generated_file(args, *parts):
+  root = getattr(args, 'overworld_generated_root', None)
+  if not root:
+    return None
+  path = os.path.join(root, *parts)
+  return path if os.path.exists(path) else None
+
+
+# Read one generated binary blob, falling back to ROM-backed data when absent.
+def read_generated_bytes(args, *parts):
+  path = generated_file(args, *parts)
+  if not path:
+    return None
+  return open(path, 'rb').read()
+
+
+# Read one generated JSON word table, falling back to the supplied ROM words.
+def read_generated_words(args, relative_parts, fallback):
+  path = generated_file(args, *relative_parts)
+  if not path:
+    return fallback
+  return json.load(open(path, 'r'))['words']
+
+
+# Read one generated overworld palette table with its fixed BGR555 word shape.
+def read_generated_palette_words(args, name, fallback):
+  return validate_generated_palette_words(
+    name, read_generated_words(args, ('palettes', '%s.json' % name), fallback))
+
+
+# Validate generated overworld palette words before uint16 asset packing.
+def validate_generated_palette_words(name, values):
+  expected_count = OW_PALETTE_WORD_COUNTS[name]
+  if len(values) != expected_count:
+    raise ValueError("%s must contain exactly %d BGR555 words." % (name, expected_count))
+  result = []
+  for index, value in enumerate(values):
+    if type(value) is not int:
+      raise ValueError("%s[%d] must be an integer BGR555 word." % (name, index))
+    if not 0 <= value <= 0xFFFF:
+      raise ValueError("%s[%d] is outside 0x0000..0xFFFF." % (name, index))
+    result.append(value)
+  return result
+
+
+# Read the generated overworld map8 tile-type table with ZScream's fixed byte shape.
+def read_generated_map8_tile_attributes(args):
+  return validate_generated_map8_tile_attributes(
+    read_generated_words(args, ('tables', 'map8_tile_attributes.json'),
+                         ROM.get_bytes(0x8E9459, 512)))
+
+
+# Validate the 512-byte overworld tile-type table before ArrayBuilder packing.
+def validate_generated_map8_tile_attributes(values):
+  if len(values) != 512:
+    raise ValueError("map8_tile_attributes must contain exactly 512 bytes.")
+  result = []
+  for index, value in enumerate(values):
+    if type(value) is not int:
+      raise ValueError("map8_tile_attributes[%d] must be an integer byte." % index)
+    if not 0 <= value <= 0xFF:
+      raise ValueError("map8_tile_attributes[%d] is outside 0x00..0xFF." % index)
+    result.append(value)
+  return result
+
+
+GRAVESTONE_COUNT = 15
+GRAVESTONE_COORD_MAX = 4088
+GRAVESTONE_AREA_MAX = 0x3F
+GRAVESTONE_LOCAL_COORD_MAX = 0x3FF
+GRAVESTONE_U16_MAX = 0xFFFF
+GRAVESTONE_TABLE_FIELDS = ('x', 'y', 'tilemap_pos')
+
+
+def read_generated_gravestone_field(args, field, fallback):
+  path = generated_file(args, 'tables', 'overworld_gravestones.json')
+  if not path:
+    return fallback
+  data = json.load(open(path, 'r'))
+  return validate_generated_gravestone_table(data)[field]
+
+
+def validate_generated_gravestone_table(data):
+  if not isinstance(data, dict):
+    raise ValueError('Generated gravestone table must be an object.')
+  if 'records' in data:
+    return validate_generated_gravestone_records(data['records'])
+  if any(name in data for name in GRAVESTONE_TABLE_FIELDS):
+    return validate_generated_gravestone_flat_fields(data)
+  raise ValueError(
+    'Generated gravestone table needs records or x/y/tilemap_pos fields.')
+
+
+def validate_generated_gravestone_flat_fields(data):
+  missing = [name for name in GRAVESTONE_TABLE_FIELDS if name not in data]
+  if missing:
+    raise ValueError('Generated gravestone table is missing fields %s.' % missing)
+  return {
+    name: validate_generated_gravestone_field(name, data[name])
+    for name in GRAVESTONE_TABLE_FIELDS
+  }
+
+
+def validate_generated_gravestone_field(field, values):
+  if not isinstance(values, list) or len(values) != GRAVESTONE_COUNT:
+    raise ValueError('Generated gravestone field %s must have %d values.' % (
+      field, GRAVESTONE_COUNT))
+  return [
+    validate_generated_gravestone_value(field, i, value)
+    for i, value in enumerate(values)
+  ]
+
+
+def validate_generated_gravestone_records(records):
+  if not isinstance(records, list) or len(records) != GRAVESTONE_COUNT:
+    raise ValueError('Generated gravestone records must have %d entries.' % (
+      GRAVESTONE_COUNT))
+  rows = [validate_generated_gravestone_record(i, record)
+          for i, record in enumerate(records)]
+  return {field: [row[field] for row in rows] for field in GRAVESTONE_TABLE_FIELDS}
+
+
+def validate_generated_gravestone_record(row_index, record):
+  if not isinstance(record, dict):
+    raise ValueError('Generated gravestone record %d must be an object.' % row_index)
+  index = validate_generated_gravestone_value('index', row_index, record.get('index'))
+  if index != row_index:
+    raise ValueError('Generated gravestone record %d has index %d.' % (
+      row_index, index))
+  x = validate_generated_gravestone_value('x', index, record.get('x'))
+  y = validate_generated_gravestone_value('y', index, record.get('y'))
+  area = validate_generated_gravestone_area(index, record.get('area', gravestone_area(x, y)))
+  tilemap_pos = validate_generated_gravestone_value(
+    'tilemap_pos', index, record.get('tilemap_pos', record.get('tilemapPos')))
+  validate_generated_gravestone_tilemap(index, area, x, y, tilemap_pos)
+  return {'area': area, 'index': index, 'tilemap_pos': tilemap_pos, 'x': x, 'y': y}
+
+
+def validate_generated_gravestone_value(field, index, value):
+  if isinstance(value, bool) or not isinstance(value, int):
+    raise ValueError('Generated gravestone %s[%d] must be an integer.' % (
+      field, index))
+  if field in ('x', 'y') and (value < 0 or value > GRAVESTONE_COORD_MAX):
+    raise ValueError('Generated gravestone %s[%d] must be 0..%d.' % (
+      field, index, GRAVESTONE_COORD_MAX))
+  if field == 'tilemap_pos':
+    validate_generated_gravestone_tilemap_value(index, value)
+  return value
+
+
+def validate_generated_gravestone_area(index, value):
+  if isinstance(value, bool) or not isinstance(value, int):
+    raise ValueError('Generated gravestone area[%d] must be an integer.' % index)
+  if value < 0 or value > GRAVESTONE_AREA_MAX:
+    raise ValueError('Generated gravestone area[%d] must be 0..0x%02x.' % (
+      index, GRAVESTONE_AREA_MAX))
+  return value
+
+
+def validate_generated_gravestone_tilemap_value(index, value):
+  if value < 0 or value > GRAVESTONE_U16_MAX:
+    raise ValueError(
+      'Generated gravestone tilemap_pos[%d] must be 0..0xffff.' % index)
+  if value & 1:
+    raise ValueError('Generated gravestone tilemap_pos[%d] must be even.' % index)
+
+
+def validate_generated_gravestone_tilemap(index, area, x, y, tilemap_pos):
+  local_x = x - (area & 7) * 512
+  local_y = y - (area >> 3) * 512
+  if local_x < 0 or local_x > GRAVESTONE_LOCAL_COORD_MAX:
+    raise ValueError('Generated gravestone x[%d] is outside area 0x%02x.' % (
+      index, area))
+  if local_y < 0 or local_y > GRAVESTONE_LOCAL_COORD_MAX:
+    raise ValueError('Generated gravestone y[%d] is outside area 0x%02x.' % (
+      index, area))
+  expected = (((local_y // 16) << 6) | ((local_x // 16) & 0x3F)) << 1
+  if tilemap_pos != expected:
+    raise ValueError(
+      'Generated gravestone tilemap_pos[%d] is 0x%04x; expected 0x%04x.' % (
+        index, tilemap_pos, expected))
+
+
+def gravestone_area(x, y):
+  return (y // 512) * 8 + (x // 512)
+
 
 class OutArrays:
   def __init__(self):
@@ -343,15 +1123,18 @@ class OutArrays:
       else:
         assert 0, type
     
-def print_overworld_tables():
+def print_overworld_tables(args):
   A = OutArrays()
   
-  A.add('uint8', 'kOverworldMapIsSmall', 192, initializer = 0, items_per_line = 8)
+  A.add('uint8', 'kOverworldMapIsSmall', OW_AREA_TOPOLOGY_ASSET_SIZE, initializer = 0, items_per_line = 8)
   A.add('uint8', 'kOverworldAuxTileThemeIndexes', 128, items_per_line = 8)
-  A.add('uint8', 'kOverworldBgPalettes', 136, items_per_line = 8)
+  A.add('uint8', 'kOverworldBgPalettes', OW_AREA_COUNT, items_per_line = 8)
   A.add('uint16', 'kOverworld_SignText', 128, items_per_line = 8)
   A.add('uint8', 'kOwMusicSets', 256, items_per_line = 8)
   A.add('uint8', 'kOwMusicSets2', 96, items_per_line = 8)
+  area_data = load_existing_overworld_yamls(args)
+  topology = build_overworld_topology(area_data)
+  special_slots = special_exit_payloads_by_slot(area_data)
   
   def get_music_byte(h, tag):
     return tables.kMusicNamesRev[h['music'][tag]] | tables.kAmbientSoundNameRev[h['ambient'][tag]] << 4
@@ -364,16 +1147,23 @@ def print_overworld_tables():
 
   def awrite(arr, area, key, value):
     arr[key] = value
-    if area < 128 and not A.kOverworldMapIsSmall[area]:
-      arr[key + 1], arr[key + 8], arr[key + 9] = value, value, value
+    for child in topology['children'].get(area, [area])[1:]:
+      child_key = key + child - area
+      if child_key < len(arr):
+        arr[child_key] = value
       
-  loaded_areas = [(i, load_overworld_yaml(i)) for i in range(160) if is_area_head(i)]
+  loaded_areas = [(i, area_data[i]) for i in topology['heads']]
 
   for i,y in loaded_areas:
     h = y['Header']
-    A.kOverworldMapIsSmall[i] = {'small':1, 'big':0}[h['size']]
+    validate_overworld_header(i, h)
+    for child in topology['children'].get(i, [i]):
+      A.kOverworldMapIsSmall[child] = 1 if topology['sizes'][child] == 0 else 0
+      A.kOverworldMapIsSmall[OW_AREA_SIZE_OFFSET + child] = topology['sizes'][child]
+      A.kOverworldMapIsSmall[OW_AREA_PARENT_OFFSET + child] = topology['parents'][child]
     if i < len(A.kOverworldAuxTileThemeIndexes): awrite(A.kOverworldAuxTileThemeIndexes, i, i, h['gfx'])
-    if i < len(A.kOverworldBgPalettes): awrite(A.kOverworldBgPalettes, i, i, h['palette'])
+    if i < len(A.kOverworldBgPalettes):
+      awrite(A.kOverworldBgPalettes, i, i, overworld_bg_palette_value(i, y, area_data, special_slots))
     if i < len(A.kOverworld_SignText): awrite(A.kOverworld_SignText, i, i, h['sign_text'])
     if i < 64:
       awrite(A.kOwMusicSets, i, i, get_music_byte(h, 'beginning'))
@@ -383,28 +1173,38 @@ def print_overworld_tables():
     elif i < 64 + 96:
       awrite(A.kOwMusicSets2, i, i - 64, get_music_byte(h, 'agahnim'))
 
-  # Allocate bird travel destination arrays — 17 slots total (9 bird + 8 whirlpool)
+  A.kOverworldMapIsSmall.extend(compile_static_overlay_blob(area_data, topology))
+
+  # Allocate bird travel destination arrays — fixed slots total (9 bird + 8 whirlpool)
   for a in ['kBirdTravel_ScreenIndex', 'kBirdTravel_Map16LoadSrcOff', 'kBirdTravel_ScrollX',
             'kBirdTravel_ScrollY', 'kBirdTravel_LinkXCoord', 'kBirdTravel_LinkYCoord',
             'kBirdTravel_CameraXScroll', 'kBirdTravel_CameraYScroll']:
-    A.add('uint16', a, 17)
-  A.add('int8', 'kBirdTravel_Unk1', 17)
-  A.add('int8', 'kBirdTravel_Unk3', 17)
+    A.add('uint16', a, OW_TRAVEL_SLOTS)
+  A.add('int8', 'kBirdTravel_Unk1', OW_TRAVEL_SLOTS)
+  A.add('int8', 'kBirdTravel_Unk3', OW_TRAVEL_SLOTS)
   # Whirlpool source area lookup — maps whirlpool index to its overworld area
-  A.add('uint16', 'kWhirlpoolAreas', 8)
+  A.add('uint16', 'kWhirlpoolAreas', OW_WHIRLPOOL_SLOTS)
 
   # Populate bird travel and whirlpool warp destinations from each area's Travel list.
   # Bird warps use explicit IDs (slots 0-8); whirlpool warps are auto-assigned (slots 9-16).
   next_whirlpool_id = 0
+  seen_bird_travel_slots = {}
+  seen_whirlpool_sources = {}
+  whirlpool_rows = []
   for i, y in loaded_areas:
-    for t in y['Travel']:
-      if 'bird_travel_id' in t:
+    for row_index, t in enumerate(overworld_navigation_rows(i, y, 'Travel')):
+      bird_slot, whirlpool_source = validate_overworld_travel_row(
+        i, row_index, t, seen_bird_travel_slots, seen_whirlpool_sources)
+      if bird_slot is not None:
         # Named bird travel destination — uses a fixed slot index
-        j = t['bird_travel_id']
+        j = bird_slot
       else:
         # Whirlpool destination — auto-assigned starting at slot 9
-        A.kWhirlpoolAreas[next_whirlpool_id] = t['whirlpool_src_area']
-        j = next_whirlpool_id + 9
+        if next_whirlpool_id >= OW_WHIRLPOOL_SLOTS:
+          raise ValueError("Overworld whirlpool travel rows must total %d." % OW_WHIRLPOOL_SLOTS)
+        A.kWhirlpoolAreas[next_whirlpool_id] = whirlpool_source
+        whirlpool_rows.append(whirlpool_source)
+        j = next_whirlpool_id + OW_BIRD_TRAVEL_SLOTS
         next_whirlpool_id += 1
       # Convert area index to absolute pixel coordinates for the overworld map.
       # The overworld is an 8-wide grid; low 3 bits give column, bits 3-5 give row.
@@ -421,54 +1221,76 @@ def print_overworld_tables():
       A.kBirdTravel_CameraYScroll[j] = t['camera_xy'][1] + base_y
       A.kBirdTravel_Unk1[j] = t['unk'][0]
       A.kBirdTravel_Unk3[j] = t['unk'][1]
+  require_overworld_slots('bird travel', seen_bird_travel_slots, OW_BIRD_TRAVEL_SLOTS)
+  require_overworld_count('whirlpool travel', whirlpool_rows, OW_WHIRLPOOL_SLOTS)
 
-  # Overworld entrance tables — 129 slots mapping overworld doorways to dungeon entrances.
+  # Overworld entrance tables — fixed slots mapping overworld doorways to dungeon entrances.
   # Each entrance records which area it belongs to, its tile position, and the dungeon entrance ID.
-  A.add('uint16', 'kOverworld_Entrance_Area', 129)
-  A.add('uint16', 'kOverworld_Entrance_Pos', 129)
-  A.add('uint8', 'kOverworld_Entrance_Id', 129)
+  A.add('uint16', 'kOverworld_Entrance_Area', OW_ENTRANCE_SLOTS)
+  A.add('uint16', 'kOverworld_Entrance_Pos', OW_ENTRANCE_SLOTS)
+  A.add('uint8', 'kOverworld_Entrance_Id', OW_ENTRANCE_SLOTS)
 
+  seen_entrance_slots = {}
   for i, y in loaded_areas:
-    for e in y['Entrances']:
-      j = e['index']
-      # Guard against duplicate entrance indices across different areas
-      assert A.kOverworld_Entrance_Id[j] == None
+    for row_index, e in enumerate(overworld_navigation_rows(i, y, 'Entrances')):
+      j, deleted, x, ycoord, entrance_id = validate_overworld_entrance_row(
+        i, row_index, e, seen_entrance_slots)
+      if deleted:
+        A.kOverworld_Entrance_Area[j] = 0
+        A.kOverworld_Entrance_Pos[j] = 0xFFFF
+        A.kOverworld_Entrance_Id[j] = 0
+        continue
       A.kOverworld_Entrance_Area[j] = i
-      A.kOverworld_Entrance_Id[j] = e['entrance_id']
+      A.kOverworld_Entrance_Id[j] = entrance_id
       # Pack tile position: x in low bits, y in upper bits (matching SNES map16 layout)
-      A.kOverworld_Entrance_Pos[j] = e['x'] << 1 | e['y'] << 7
+      A.kOverworld_Entrance_Pos[j] = x << 1 | ycoord << 7
+  require_overworld_slots('entrance', seen_entrance_slots, OW_ENTRANCE_SLOTS)
 
-  # Fall hole tables — 19 overworld pits that drop Link into dungeon rooms.
-  # Holes are sorted by entrance ID so the engine can binary-search at runtime.
-  A.add('uint16', 'kFallHole_Area', 19)
-  A.add('uint16', 'kFallHole_Pos', 19)
-  A.add('uint8', 'kFallHole_Entrances', 19)
+  # Fall hole tables — fixed overworld pits that drop Link into dungeon rooms.
+  # ZScream stores these as fixed AllHoles[] slots. Legacy YAML without an index is
+  # assigned by the old entrance-id sort so current source data keeps its output.
+  A.add('uint16', 'kFallHole_Area', OW_HOLE_SLOTS)
+  A.add('uint16', 'kFallHole_Pos', OW_HOLE_SLOTS)
+  A.add('uint8', 'kFallHole_Entrances', OW_HOLE_SLOTS)
 
-  # Collect all holes from every area, then sort by entrance_id for the engine's lookup
-  holes = []
+  seen_hole_slots = {}
+  legacy_holes = []
   for i, y in loaded_areas:
-    if 'Holes' not in y: continue
-    for e in y['Holes']:
-      x, y, j = e['x'], e['y'], e['entrance_id']
-      # Pack position with y-8 offset to compensate for the HUD area at the top of screen
-      holes.append((j, x << 1 | ((y - 8) & 0x3f) << 7, i))
-  for i, (entrance, pos, area) in enumerate(sorted(holes)):
-    A.kFallHole_Area[i] = area
-    A.kFallHole_Pos[i] = pos
-    A.kFallHole_Entrances[i] = entrance
+    for row_index, e in enumerate(overworld_navigation_rows(i, y, 'Holes')):
+      slot, deleted, x, ycoord, entrance = validate_overworld_hole_row(
+        i, row_index, e, seen_hole_slots)
+      if deleted:
+        A.kFallHole_Area[slot] = 0
+        A.kFallHole_Pos[slot] = 0xFBFF
+        A.kFallHole_Entrances[slot] = 0
+        continue
+      pos = x << 1 | ((ycoord - OW_HOLE_Y_MIN) & OW_NAV_GRID_MAX) << 7
+      if slot is None:
+        legacy_holes.append((entrance, pos, i, row_index))
+      else:
+        A.kFallHole_Area[slot] = i
+        A.kFallHole_Pos[slot] = pos
+        A.kFallHole_Entrances[slot] = entrance
+  for entrance, pos, area, row_index in sorted(legacy_holes):
+    slot = first_free_overworld_slot(seen_hole_slots, OW_HOLE_SLOTS)
+    seen_hole_slots[slot] = (area, row_index)
+    A.kFallHole_Area[slot] = area
+    A.kFallHole_Pos[slot] = pos
+    A.kFallHole_Entrances[slot] = entrance
+  require_overworld_slots('fall-hole', seen_hole_slots, OW_HOLE_SLOTS)
 
   # Exit data — 79 dungeon-to-overworld exit points with full scroll/position/camera state.
   # These define where Link appears on the overworld when leaving a dungeon room.
-  A.add('uint8', 'kExitData_ScreenIndex', 79)
+  A.add('uint8', 'kExitData_ScreenIndex', OW_EXIT_SLOTS)
   for a in ['kExitDataRooms', 'kExitData_Map16LoadSrcOff', 'kExitData_ScrollX',
             'kExitData_ScrollY', 'kExitData_XCoord', 'kExitData_YCoord',
             'kExitData_CameraXScroll', 'kExitData_CameraYScroll']:
-    A.add('uint16', a, 79)
+    A.add('uint16', a, OW_EXIT_SLOTS)
   # Door arrays default to 0 (no door) — only populated when an exit has a door animation
-  A.add('uint16', 'kExitData_NormalDoor', 79, initializer = 0)
-  A.add('uint16', 'kExitData_FancyDoor', 79, initializer = 0)
-  A.add('int8', 'kExitData_Unk1', 79)
-  A.add('int8', 'kExitData_Unk3', 79)
+  A.add('uint16', 'kExitData_NormalDoor', OW_EXIT_SLOTS, initializer = 0)
+  A.add('uint16', 'kExitData_FancyDoor', OW_EXIT_SLOTS, initializer = 0)
+  A.add('int8', 'kExitData_Unk1', OW_EXIT_SLOTS)
+  A.add('int8', 'kExitData_Unk3', OW_EXIT_SLOTS)
 
   # Special exit tables — 16 slots for rooms 0x180+ that override the normal exit behavior.
   # These define custom scroll boundaries and graphical settings for the destination area.
@@ -489,16 +1311,28 @@ def print_overworld_tables():
   A.add('uint8', 'kSpExit_PalSpr', 16, initializer = 0)
   
   # Populate exit data from each area's Exits list
+  seen_exit_slots = {}
+  seen_special_exit_rooms = {}
   for i, y in loaded_areas:
-    for e in y['Exits']:
-      j = e['index']
+    for row_index, e in enumerate(overworld_navigation_rows(i, y, 'Exits')):
+      j, deleted, room = validate_overworld_exit_row(i, row_index, e, seen_exit_slots)
+      if deleted:
+        A.kExitData_ScreenIndex[j] = 0
+        A.kExitDataRooms[j] = 0
+        A.kExitData_Map16LoadSrcOff[j] = 0
+        A.kExitData_ScrollX[j] = 0
+        A.kExitData_ScrollY[j] = 0
+        A.kExitData_XCoord[j] = 0xFFFF
+        A.kExitData_YCoord[j] = 0xFFFF
+        A.kExitData_CameraXScroll[j] = 0
+        A.kExitData_CameraYScroll[j] = 0
+        A.kExitData_Unk1[j] = 0
+        A.kExitData_Unk3[j] = 0
+        continue
       # Compute absolute pixel origin for this overworld area
       base_x, base_y = (i & 7) << 9, (i & 56) << 6
-      # Each exit index must be unique across all areas
-      assert A.kExitData_ScreenIndex[j] == None
       A.kExitData_ScreenIndex[j] = i
-      room = e['room']
-      A.kExitDataRooms[j] = e['room']
+      A.kExitDataRooms[j] = room
       A.kExitData_Map16LoadSrcOff[j] = get_loadoffs(e['scroll_xy'], e['load_xy'])
       # Convert area-relative coordinates to absolute overworld pixel coordinates
       A.kExitData_ScrollX[j] = e['scroll_xy'][0] + base_x
@@ -514,102 +1348,225 @@ def print_overworld_tables():
       if door != None:
         # Normal doors: wooden or bombable — bit 15 flags bombable type
         if door[0] in ('bombable', 'wooden'):
-          A.kExitData_NormalDoor[j] = door[1] << 1 | door[2] << 7 | (0x8000 if door[0] == 'bombable' else 0)
+          door_type = 0x8000 if door[0] == 'bombable' else 0
+          A.kExitData_NormalDoor[j] = door[1] << 1 | door[2] << 7 | door_type
         # Fancy doors: palace or sanctuary — bit 15 flags palace type
         elif door[0] in ('palace', 'sanctuary'):
-          A.kExitData_FancyDoor[j] = door[1] << 1 | door[2] << 7 | (0x8000 if door[0] == 'palace' else 0)
-        else:
-          assert e[0] == 'none'
+          door_type = 0x8000 if door[0] == 'palace' else 0
+          A.kExitData_FancyDoor[j] = door[1] << 1 | door[2] << 7 | door_type
       # Special exits override scroll boundaries and gfx for rooms >= 0x180
       se = e.get('special_exit')
+      validate_special_exit_payload(i, j, room, se, seen_special_exit_rooms)
       if se:
         # Index into special exit tables: room 0x180 maps to slot 0, 0x181 to slot 1, etc.
-        j = room - 0x180
+        sp_slot = room - SPECIAL_EXIT_ROOM_MIN
         # Direction is stored doubled for the engine's 2-byte step size
-        A.kSpExit_Dir[j] = se['dir'] * 2
-        A.kSpExit_SprGfx[j] = se['spr_gfx']
-        A.kSpExit_AuxGfx[j] = se['aux_gfx']
-        A.kSpExit_PalBg[j] = se['pal_bg']
-        A.kSpExit_PalSpr[j] = se['pal_spr']
+        A.kSpExit_Dir[sp_slot] = se['dir'] * 2
+        A.kSpExit_SprGfx[sp_slot] = se['spr_gfx']
+        A.kSpExit_AuxGfx[sp_slot] = se['aux_gfx']
+        A.kSpExit_PalBg[sp_slot] = se['pal_bg']
+        A.kSpExit_PalSpr[sp_slot] = se['pal_spr']
         # Scroll boundaries defining the walkable region on the destination screen
-        A.kSpExit_Top[j] = se['top']
-        A.kSpExit_Bottom[j] = se['bottom']
-        A.kSpExit_Left[j] = se['left']
-        A.kSpExit_Right[j] = se['right']
-        A.kSpExit_LeftEdgeOfMap[j] = se['left_edge_of_map']
-        A.kSpExit_Tab4[j] = se['unk4']
-        A.kSpExit_Tab5[j] = se['unk5']
-        A.kSpExit_Tab6[j] = se['unk6']
-        A.kSpExit_Tab7[j] = se['unk7']
+        A.kSpExit_Top[sp_slot] = se['top']
+        A.kSpExit_Bottom[sp_slot] = se['bottom']
+        A.kSpExit_Left[sp_slot] = se['left']
+        A.kSpExit_Right[sp_slot] = se['right']
+        A.kSpExit_LeftEdgeOfMap[sp_slot] = se['left_edge_of_map']
+        A.kSpExit_Tab4[sp_slot] = se['unk4']
+        A.kSpExit_Tab5[sp_slot] = se['unk5']
+        A.kSpExit_Tab6[sp_slot] = se['unk6']
+        A.kSpExit_Tab7[sp_slot] = se['unk7']
+  require_overworld_slots('exit', seen_exit_slots, OW_EXIT_SLOTS)
 
 
   # Overworld secrets/collectibles — variable-length per-area item lists with an offset table.
-  # Areas without items point to the last 0xFFFF terminator to avoid needing a null check.
+  # Areas without items point to offset 0, an explicit 0xFFFF terminator.
   A.add('uint16', 'kOverworldSecrets_Offs', 128, initializer = None)
   A.add('uint8', 'kOverworldSecrets', 0)
+  A.kOverworldSecrets.extend([0xff, 0xff])
+  item_blob_offsets = {(0xff, 0xff): 0}
+
+  def intern_item_blob(blob):
+    key = tuple(blob)
+    if key not in item_blob_offsets:
+      item_blob_offsets[key] = len(A.kOverworldSecrets)
+      A.kOverworldSecrets.extend(blob)
+    return item_blob_offsets[key]
+
   for i, y in loaded_areas:
     if len(y['Items']):
       # Secrets only exist in the first 128 areas (light/dark world, not special areas)
-      assert i < 128
-      # Record the byte offset where this area's item list begins
-      j = len(A.kOverworldSecrets)
-      awrite(A.kOverworldSecrets_Offs, i, i, j)
-      for e in y['Items']:
+      if i >= 128:
+        raise ValueError("Overworld Items are not compiler-backed for area %d." % i)
+      item_blob = []
+      for row_index, e in enumerate(y['Items']):
         # Pack tile position and convert item name to its numeric code
-        pos = e[0] << 1 | e[1] << 7
-        item = tables.kSecretNamesRev[e[2]]
-        A.kOverworldSecrets.extend([pos & 0xff, pos >> 8, item])
-      # 0xFFFF sentinel marks end of this area's item list
-      A.kOverworldSecrets.extend([0xff, 0xff])
-  # Areas with no items share a pointer to the final terminator (saves space)
+        x, ycoord, item = validate_overworld_item_row(i, y, row_index, e)
+        pos = x << 1 | ycoord << 7
+        item_blob.extend([pos & 0xff, pos >> 8, item])
+      # 0xFFFF sentinel marks end of this area's item list.
+      item_blob.extend([0xff, 0xff])
+      awrite(A.kOverworldSecrets_Offs, i, i, intern_item_blob(item_blob))
+  # Areas with no items share offset 0, an explicit empty 0xFFFF list.
   for i in range(128):
     if A.kOverworldSecrets_Offs[i] == None:
-      A.kOverworldSecrets_Offs[i] = len(A.kOverworldSecrets) - 2
+      A.kOverworldSecrets_Offs[i] = 0
 
-  # Overworld sprite placement — 3 game progression stages x 144 areas.
-  # Each stage has its own sprite list; the offset table is indexed as stage*144 + area.
-  A.add('uint16', 'kOverworldSpriteOffs', 144 * 3, initializer = 0)
+  # Overworld sprite placement — 3 game progression stages x 160 areas.
+  # Each stage has its own sprite list; the offset table is indexed as stage*160 + area.
+  ow_sprite_area_count = 160
+  A.add('uint16', 'kOverworldSpriteOffs', ow_sprite_area_count * 3, initializer = 0)
   A.add('uint8', 'kOverworldSprites', 0)
   # Per-area sprite tileset and palette indices, organized in 64-area blocks per stage
   A.add('uint8', 'kOverworldSpriteGfx', 256)
   A.add('uint8', 'kOverworldSpritePalettes', 256)
   # Byte 0 = 0xFF acts as the empty/null sprite list that offset 0 points to
   A.kOverworldSprites.append(0xff)
+  sprite_blob_offsets = {(0xff,): 0}
+
+  def intern_sprite_blob(blob):
+    key = tuple(blob)
+    if key not in sprite_blob_offsets:
+      sprite_blob_offsets[key] = len(A.kOverworldSprites)
+      A.kOverworldSprites.extend(blob)
+    return sprite_blob_offsets[key]
+
   # Compile sprites for a range of areas belonging to a particular game stage.
   # Parameters:
   #   start, end: area index range to process
   #   stagename: YAML key identifying the sprite stage (e.g. 'Sprites.Beginning')
   #   sprite_stage_idxs: which offset table stage slots this data should fill
   #   infostage: which 64-area block in the gfx/palette arrays to write to
+  def parse_sprite_byte(value, field, area, stagename):
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+      raise ValueError("Overworld sprite %s for area %d %s must be a byte." % (field, area, stagename))
+    try:
+      number = int(value, 0) if isinstance(value, str) else int(value)
+    except (TypeError, ValueError):
+      raise ValueError("Overworld sprite %s for area %d %s must be a byte." % (field, area, stagename))
+    if number < 0 or number > 255:
+      raise ValueError("Overworld sprite %s for area %d %s is out of byte range." % (field, area, stagename))
+    return number
+
+  def validate_sprite_set(area, stagename, area_data):
+    if stagename not in area_data or not isinstance(area_data[stagename], dict):
+      if area >= 144 and stagename == 'Sprites' and stagename not in area_data:
+        return {'info': {}, 'sprites': []}
+      raise ValueError("Overworld sprite set for area %d %s must be an object." % (
+        area, stagename))
+    sprite_set = area_data[stagename]
+    if 'sprites' not in sprite_set or not isinstance(sprite_set['sprites'], list):
+      raise ValueError("Overworld sprite list for area %d %s must be a list." % (
+        area, stagename))
+    if 'info' in sprite_set and not isinstance(sprite_set['info'], dict):
+      raise ValueError("Overworld sprite info for area %d %s must be an object." % (
+        area, stagename))
+    return sprite_set
+
+  def compile_sprite_row(area, area_data, stagename, row):
+    limits = overworld_coord_limits(area_data['Header'])
+    if not isinstance(row, list) or len(row) not in (3, 4):
+      raise ValueError("Overworld sprite row for area %d %s must be [x, y, name]." % (
+        area, stagename))
+    x = parse_sprite_byte(row[0], 'x', area, stagename)
+    y = parse_sprite_byte(row[1], 'y', area, stagename)
+    if x > limits['x'] or y > limits['y']:
+      raise ValueError(
+        "Overworld sprite coordinate for area %d %s exceeds x<=%d, y<=%d." % (
+          area, stagename, limits['x'], limits['y']))
+    if row[2] not in tables.kSpriteNamesRev:
+      raise ValueError("Unknown overworld sprite name %r in area %d %s." % (row[2], area, stagename))
+    sprite_type = tables.kSpriteNamesRev[row[2]]
+    if sprite_type > 255:
+      raise ValueError(
+          "Overworld sprite name %r in area %d %s is not byte-encodable." % (row[2], area, stagename))
+    return x, y, sprite_type
+
+  def parse_sprite_info(area, stagename, info):
+    if not isinstance(info, dict):
+      raise ValueError("Overworld sprite info for area %d %s must be an object." % (
+        area, stagename))
+    if area >= 128:
+      if info:
+        raise ValueError("Overworld sprite info for area %d %s is not compiler-backed." % (area, stagename))
+      return None
+    return {
+      'gfx': parse_sprite_byte(info.get('gfx'), 'gfx', area, stagename),
+      'palette': parse_sprite_byte(info.get('palette'), 'palette', area, stagename),
+    }
+
+  def custom_visual_byte(visual, info, key, field, area, stagename):
+    value = visual[key] if key in visual else (None if info is None else info[key])
+    if value is None:
+      raise ValueError("Overworld sprite %s for area %d %s requires an explicit value." % (
+        field, area, stagename))
+    return parse_sprite_byte(value, field, area, stagename)
+
+  def compile_custom_sprite_visual(area, stagename, visual, info):
+    if not isinstance(visual, dict):
+      raise ValueError("Overworld sprite custom visual for area %d %s must be an object." % (
+        area, stagename))
+    gfx = custom_visual_byte(visual, info, 'gfx', 'custom gfx', area, stagename)
+    palette = custom_visual_byte(visual, info, 'palette', 'custom palette', area, stagename)
+    dark_world = visual.get('darkWorld', False)
+    if not isinstance(dark_world, bool):
+      raise ValueError("Overworld sprite custom darkWorld for area %d %s must be boolean." % (
+        area, stagename))
+    flags = 1 if dark_world else 0
+    return gfx, palette, flags
+
   def do_sprite_range(start, end, stagename, sprite_stage_idxs, infostage):
     for i, y in loaded_areas:
       if i < start or i >= end: continue
-      info = y[stagename]['info']
+      sprite_set = validate_sprite_set(i, stagename, y)
+      info = parse_sprite_info(i, stagename, sprite_set.get('info', {}))
       # Only the first 128 areas (light + dark world) have per-stage gfx/palette settings
-      if i < 128:
+      if info is not None:
         awrite(A.kOverworldSpriteGfx, i, (i & 63) + infostage * 64, info['gfx'])
         awrite(A.kOverworldSpritePalettes, i, (i & 63) + infostage * 64, info['palette'])
-      if len(y[stagename]['sprites']):
-        # Point all applicable stages to this sprite list in the data blob
-        for stage in sprite_stage_idxs:
-          A.kOverworldSpriteOffs[stage * 144 + i] = len(A.kOverworldSprites)
-        # Each sprite is 3 bytes: y-coord, x-coord, sprite type ID
-        for e in y[stagename]['sprites']:
-          A.kOverworldSprites.extend([e[1], e[0], tables.kSpriteNamesRev[e[2]]])
+      if len(sprite_set['sprites']):
+        # Vanilla sprites are always 3 bytes: y-coord, x-coord, sprite type ID.
+        # Custom visual data lives after the normal 0xFF terminator so older
+        # placement readers still see exactly one ordinary sprite record.
+        sprite_blob = []
+        custom_visuals = []
+        for e in sprite_set['sprites']:
+          x, ycoord, sprite_type = compile_sprite_row(i, y, stagename, e)
+          sprite_blob.extend([ycoord, x, sprite_type])
+          if len(e) > 3:
+            gfx, palette, flags = compile_custom_sprite_visual(i, stagename, e[3], info)
+            custom_visuals.extend([ycoord, x, gfx, palette, flags])
         # 0xFF sentinel terminates this area's sprite list
-        A.kOverworldSprites.append(0xff)
+        sprite_blob.append(0xff)
+        custom_count = len(custom_visuals) // 5
+        if custom_count > 255:
+          raise ValueError("Overworld sprite custom visual count for area %d %s exceeds 255." % (
+            i, stagename))
+        # Post-sentinel custom tail: magic 0xFE,'O','W', count, then
+        # y, x, source-gfx, source-palette, flags for each isolated sprite.
+        sprite_blob.extend([0xfe, 0x4f, 0x57, custom_count])
+        sprite_blob.extend(custom_visuals)
+        offset = intern_sprite_blob(sprite_blob)
+        for stage in sprite_stage_idxs:
+          A.kOverworldSpriteOffs[stage * ow_sprite_area_count + i] = offset
   # Light world areas 0-63 have three distinct stages reflecting game progression
   do_sprite_range(0, 64, 'Sprites.Beginning', [0], 0)
   do_sprite_range(0, 64, 'Sprites.FirstPart', [1], 1)
   do_sprite_range(0, 64, 'Sprites.SecondPart', [2], 2)
-  # Dark world + special areas 64-143 share one sprite set across stages 1 and 2
-  do_sprite_range(64, 144, 'Sprites', [1, 2], 3)
+  # Dark world + special areas 64-159 share one sprite set across all three pointer banks.
+  do_sprite_range(64, ow_sprite_area_count, 'Sprites', [0, 1, 2], 3)
 
   # Flush all overworld ArrayBuilder data into the asset dictionary
   A.write()
-  # Tile attribute lookup tables read directly from ROM — used for collision/interaction checks
-  add_asset_uint8('kMap8DataToTileAttr', ROM.get_bytes(0x8E9459, 512))
+  # Tile attribute lookup tables read directly from ROM - used for collision/interaction checks
+  add_asset_uint8('kMap8DataToTileAttr', read_generated_map8_tile_attributes(args))
   add_asset_uint8('kSomeTileAttr', ROM.get_bytes(0x9bf110, 3824))
+  add_asset_uint16('kGeneratedOverworldGravestoneX',
+                   read_generated_gravestone_field(args, 'x', ROM.get_words(0x099986, 15)))
+  add_asset_uint16('kGeneratedOverworldGravestoneY',
+                   read_generated_gravestone_field(args, 'y', ROM.get_words(0x099968, 15)))
+  add_asset_uint16('kGeneratedOverworldGravestoneTilemapPos',
+                   read_generated_gravestone_field(args, 'tilemap_pos', ROM.get_words(0x0999A4, 15)))
 
 
 # Compile dungeon minimap layout data for the pause screen map display.
@@ -1094,14 +2051,15 @@ def print_all(args):
   print_enemy_damage_data()
   print_link_graphics()
   print_dungeon_sprites()
-  print_map32_to_map16()
+  map32_path = generated_file(args, 'map32_to_map16.txt') or 'map32_to_map16.txt'
+  print_map32_to_map16(map32_path)
   print_images(args)
   print_misc(args)
   print_dialogue(args)
   print_dungeon_map()
   print_tilemaps()
-  print_overworld()
-  print_overworld_tables()
+  print_overworld(args)
+  print_overworld_tables(args)
 
 # Pack all compiled assets into the final zelda3_assets.dat binary file.
 # File format: 48-byte header (16-byte signature + 32-byte SHA256 of key names),
@@ -1181,6 +2139,8 @@ if __name__ == "__main__":
     sprites_from_png = False
     languages = None
     print_assets_header = False
+    overworld_source_root = None
+    overworld_generated_root = None
   main(DefaultArgs())
 else:
   # Module import path — restool.py loads the ROM before importing this module

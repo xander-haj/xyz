@@ -11,7 +11,6 @@
 #include "util.h"
 
 #include <errno.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,36 +33,17 @@ static const char kRuntimeAssetsName[] = "zelda3_assets.dat";
 static const char kRuntimeBpsName[] = "zelda3_assets.bps";
 static const char kRuntimeBpsSourceRomName[] = "zelda3.sfc";
 
-enum { kRuntimePathSize = 4096 };
-
-static char g_runtime_dir[kRuntimePathSize];
-static char g_config_dir[kRuntimePathSize];
-static char g_data_dir[kRuntimePathSize];
-static char g_save_dir[kRuntimePathSize];
-static char g_default_config_file[kRuntimePathSize];
-static char g_user_config_file[kRuntimePathSize];
-static char g_assets_file[kRuntimePathSize];
-static char g_bps_file[kRuntimePathSize];
-static char g_bps_source_rom_file[kRuntimePathSize];
-static char g_path_scratch[kRuntimePathSize];
+static char g_runtime_dir[4096];
+static char g_config_dir[4096];
+static char g_data_dir[4096];
+static char g_save_dir[4096];
+static char g_default_config_file[4096];
+static char g_user_config_file[4096];
+static char g_assets_file[4096];
+static char g_bps_file[4096];
+static char g_bps_source_rom_file[4096];
+static char g_path_scratch[4096];
 static bool g_use_user_override_config_file;
-
-/* RuntimePath_GetCwd: platform-neutral getcwd wrapper.
- *
- * Parameters:
- *   dst      - destination path buffer.
- *   dst_size - destination capacity.
- *
- * Returns dst on success, NULL on failure.
- */
-static char *RuntimePath_GetCwd(char *dst, size_t dst_size) {
-#ifdef _WIN32
-  int maxlen = dst_size > (size_t)INT_MAX ? INT_MAX : (int)dst_size;
-  return getcwd(dst, maxlen);
-#else
-  return getcwd(dst, dst_size);
-#endif
-}
 
 /* RuntimePath_IsAbsolute: checks whether a path is absolute on the host OS.
  *
@@ -94,15 +74,7 @@ static bool RuntimePath_IsAbsolute(const char *path) {
  * Returns nothing. Overlong paths are truncated but remain NUL-terminated.
  */
 static void RuntimePath_Copy(char *dst, size_t dst_size, const char *src) {
-  if (dst_size == 0)
-    return;
-  if (!src)
-    src = "";
-  size_t len = strlen(src);
-  if (len >= dst_size)
-    len = dst_size - 1;
-  memmove(dst, src, len);
-  dst[len] = 0;
+  snprintf(dst, dst_size, "%s", src ? src : "");
 }
 
 /* RuntimePath_Join: joins a directory and filename with one slash.
@@ -120,36 +92,9 @@ static void RuntimePath_Join(char *dst, size_t dst_size, const char *dir, const 
     RuntimePath_Copy(dst, dst_size, name);
     return;
   }
-  if (dst_size == 0)
-    return;
   size_t len = strlen(dir);
   const char *sep = (len != 0 && (dir[len - 1] == '/' || dir[len - 1] == '\\')) ? "" : "/";
-  size_t sep_len = strlen(sep);
-  size_t name_len = name ? strlen(name) : 0;
-  size_t pos = 0;
-
-  if (len >= dst_size)
-    len = dst_size - 1;
-  memmove(dst, dir, len);
-  pos = len;
-
-  if (pos < dst_size - 1) {
-    size_t copy_len = sep_len;
-    if (copy_len > dst_size - 1 - pos)
-      copy_len = dst_size - 1 - pos;
-    memmove(dst + pos, sep, copy_len);
-    pos += copy_len;
-  }
-
-  if (pos < dst_size - 1 && name_len != 0) {
-    size_t copy_len = name_len;
-    if (copy_len > dst_size - 1 - pos)
-      copy_len = dst_size - 1 - pos;
-    memmove(dst + pos, name, copy_len);
-    pos += copy_len;
-  }
-
-  dst[pos] = 0;
+  snprintf(dst, dst_size, "%s%s%s", dir, sep, name);
 }
 
 /* RuntimePath_LastSeparator: finds the final path separator in a path.
@@ -237,7 +182,7 @@ static bool RuntimePath_MkdirOne(const char *path) {
  * Returns true when the full path exists or was created.
  */
 static bool RuntimePath_Mkdirs(const char *path) {
-  char tmp[kRuntimePathSize];
+  char tmp[4096];
   RuntimePath_Copy(tmp, sizeof(tmp), path);
   size_t len = strlen(tmp);
   if (len == 0)
@@ -284,8 +229,8 @@ static void RuntimePath_AbsoluteFromCwd(char *dst, size_t dst_size, const char *
     RuntimePath_Copy(dst, dst_size, path);
     return;
   }
-  char cwd[kRuntimePathSize];
-  if (!RuntimePath_GetCwd(cwd, sizeof(cwd))) {
+  char cwd[4096];
+  if (!getcwd(cwd, sizeof(cwd))) {
     RuntimePath_Copy(dst, dst_size, path);
     return;
   }
@@ -349,12 +294,12 @@ static void RuntimePath_InitUserDirs(const char *explicit_config, bool use_xdg_u
     return;
   }
 
-  char config_base[kRuntimePathSize], data_base[kRuntimePathSize];
+  char config_base[4096], data_base[4096];
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(__SWITCH__)
   const char *home = getenv("HOME");
-  char config_fallback[kRuntimePathSize], data_fallback[kRuntimePathSize];
-  RuntimePath_Join(config_fallback, sizeof(config_fallback), home ? home : ".", ".config");
-  RuntimePath_Join(data_fallback, sizeof(data_fallback), home ? home : ".", ".local/share");
+  char config_fallback[4096], data_fallback[4096];
+  snprintf(config_fallback, sizeof(config_fallback), "%s/.config", home ? home : ".");
+  snprintf(data_fallback, sizeof(data_fallback), "%s/.local/share", home ? home : ".");
   RuntimePath_EnvOrFallback(config_base, sizeof(config_base), "XDG_CONFIG_HOME", config_fallback);
   RuntimePath_EnvOrFallback(data_base, sizeof(data_base), "XDG_DATA_HOME", data_fallback);
 #else
@@ -374,7 +319,7 @@ static void RuntimePath_InitUserDirs(const char *explicit_config, bool use_xdg_u
  * through the BPS fallback path.
  */
 static bool RuntimePath_CandidateHasAssets(const char *dir) {
-  char path[kRuntimePathSize];
+  char path[4096];
   RuntimePath_Join(path, sizeof(path), dir, kRuntimeAssetsName);
   if (RuntimePath_FileExists(path))
     return true;
@@ -391,7 +336,7 @@ static bool RuntimePath_CandidateHasAssets(const char *dir) {
  * Returns true when zelda3.ini is present in the candidate directory.
  */
 static bool RuntimePath_CandidateHasDefaultConfig(const char *dir) {
-  char path[kRuntimePathSize];
+  char path[4096];
   RuntimePath_Join(path, sizeof(path), dir, kRuntimeDefaultConfigName);
   return RuntimePath_FileExists(path);
 }
@@ -419,8 +364,8 @@ static bool RuntimePath_CandidateMatches(const char *dir, bool require_assets) {
  * Returns true when a candidate was found.
  */
 static bool RuntimePath_FindFromCwd(char *dst, size_t dst_size, bool require_assets) {
-  char buf[kRuntimePathSize];
-  if (!RuntimePath_GetCwd(buf, sizeof(buf)))
+  char buf[4096];
+  if (!getcwd(buf, sizeof(buf)))
     return false;
   size_t pos = strlen(buf);
   for (int step = 0; pos != 0 && step < 3; step++) {
@@ -479,7 +424,7 @@ static void RuntimePath_FindRuntimeDir(char *dst, size_t dst_size) {
   if (RuntimePath_FindFromBasePath(dst, dst_size, false))
     return;
 
-  if (!RuntimePath_GetCwd(dst, dst_size))
+  if (!getcwd(dst, dst_size))
     RuntimePath_Copy(dst, dst_size, ".");
 }
 
@@ -539,7 +484,7 @@ static void RuntimePath_EnsureDefaultConfig(const char *template_file) {
 }
 
 void RuntimePaths_Init(const char *config_file) {
-  char explicit_config[kRuntimePathSize] = {0};
+  char explicit_config[4096] = {0};
   if (config_file)
     RuntimePath_AbsoluteFromCwd(explicit_config, sizeof(explicit_config), config_file);
 
@@ -552,7 +497,7 @@ void RuntimePaths_Init(const char *config_file) {
   RuntimePath_Join(g_save_dir, sizeof(g_save_dir), g_data_dir, "saves");
   RuntimePath_Mkdirs(g_save_dir);
 
-  char runtime_default_config[kRuntimePathSize];
+  char runtime_default_config[4096];
   RuntimePath_Join(runtime_default_config, sizeof(runtime_default_config), g_runtime_dir, kRuntimeDefaultConfigName);
   bool has_runtime_default_config = RuntimePath_FileExists(runtime_default_config);
 
@@ -605,27 +550,21 @@ const char *RuntimePath_BpsSourceRomFile(void) {
 }
 
 const char *RuntimePath_SaveSlotFile(int which) {
-  char filename[32];
-  int n = snprintf(filename, sizeof(filename), "save%d.sav", which);
-  if (n < 0 || (size_t)n >= sizeof(filename))
-    RuntimePath_Copy(filename, sizeof(filename), "save.sav");
-  RuntimePath_Join(g_path_scratch, sizeof(g_path_scratch), g_save_dir, filename);
+  snprintf(g_path_scratch, sizeof(g_path_scratch), "%s/save%d.sav", g_save_dir, which);
   return g_path_scratch;
 }
 
 const char *RuntimePath_ReferenceSaveFile(const char *filename) {
-  char ref_dir[kRuntimePathSize];
-  RuntimePath_Join(ref_dir, sizeof(ref_dir), g_runtime_dir, "saves/ref");
-  RuntimePath_Join(g_path_scratch, sizeof(g_path_scratch), ref_dir, filename);
+  snprintf(g_path_scratch, sizeof(g_path_scratch), "%s/saves/ref/%s", g_runtime_dir, filename);
   return g_path_scratch;
 }
 
 const char *RuntimePath_SramFile(void) {
-  RuntimePath_Join(g_path_scratch, sizeof(g_path_scratch), g_save_dir, "sram.dat");
+  snprintf(g_path_scratch, sizeof(g_path_scratch), "%s/sram.dat", g_save_dir);
   return g_path_scratch;
 }
 
 const char *RuntimePath_SramBackupFile(void) {
-  RuntimePath_Join(g_path_scratch, sizeof(g_path_scratch), g_save_dir, "sram.bak");
+  snprintf(g_path_scratch, sizeof(g_path_scratch), "%s/sram.bak", g_save_dir);
   return g_path_scratch;
 }

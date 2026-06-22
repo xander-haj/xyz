@@ -54,6 +54,13 @@ optional.add_argument('--print-strings', action='store_true', help="Print all di
 # --print-assets-header: emit a C header file mapping asset names to array indices,
 # used by the C codebase to reference packed assets by symbolic name.
 optional.add_argument('--print-assets-header', action='store_true')
+# --dump-overworld: write explicit overworld visual intermediates for the dev viewer.
+optional.add_argument('--dump-overworld', action='store_true', help='Dump overworld visual source files for the dev viewer')
+# --mod: build and dump the generated local state for one overworld mod.
+optional.add_argument('--mod', action='store', metavar='MOD', help='Overworld mod id/path for --dump-overworld')
+# --apply-overworld-mods: build generated local assets and compile with them.
+optional.add_argument('--apply-overworld-mods', action='store', metavar='MODS',
+                      help='Comma-separated overworld mod ids/paths to apply during compilation')
 
 # --- Image handling group ---
 # Options that change how sprite graphics are sourced during compilation.
@@ -86,6 +93,16 @@ if args.extract_dialogue:
 # For all non-dialogue workflows, load the ROM normally.
 ROM = util.load_rom(args.rom)
 
+# Overworld mod builds are data-only: the builder reads JSON recipes and writes
+# local generated assets that compile/dump paths can consume.
+args.overworld_generated_root = None
+args.overworld_source_root = None
+if args.apply_overworld_mods:
+  from modding.overworld_builder import build_mods
+  summary = build_mods([part.strip() for part in args.apply_overworld_mods.split(',') if part.strip()])
+  args.overworld_generated_root = summary['generated']['root']
+  args.overworld_source_root = summary['generated']['overworld_maps']
+
 # want_compile tracks whether we should run the final compilation step.
 # Certain flags (like --print-strings) are inspection-only and suppress compilation.
 want_compile = True
@@ -102,6 +119,22 @@ if args.extract_from_rom:
 if args.print_strings:
   import text_compression
   text_compression.print_strings(ROM)
+  want_compile = False
+
+# Overworld dump workflow: write the raw/dependent overworld visual assets to
+# assets/overworld_dump and print the file patterns the viewer should consume.
+if args.dump_overworld:
+  import dump_overworld
+  if args.mod:
+    from modding.overworld_builder import build_mods
+    summary = build_mods([part.strip() for part in args.mod.split(',') if part.strip()])
+    dump_overworld.main(
+      source_root=summary['generated']['overworld_maps'],
+      out_dir=summary['generated']['root'] + '/overworld_dump',
+      generated_root=summary['generated']['root'],
+    )
+  else:
+    dump_overworld.main()
   want_compile = False
 
 # Compilation workflow: compile all intermediate resource files into zelda3_assets.dat,

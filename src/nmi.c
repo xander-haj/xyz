@@ -53,6 +53,7 @@
 #include "assets.h"
 #include "audio.h"
 #include "hud.h"
+#include "sprite.h"
 
 /*
  * VRAM destination address table for NMI_UploadTilemap().
@@ -532,6 +533,7 @@ void NMI_DoUpdates() {  // 8089e0
    * shadow; 0x220 bytes covers all 128 sprite entries (low 4 bytes
    * each = 0x200) plus the 32 high bytes (X-bit + size). */
   memcpy(g_zenv.ppu->oam, &g_ram[0x800], 0x220);
+  Sprite_CustomSyncOamToPpu(g_zenv.ppu);
 
   /* Stripe upload: a flag-driven dispatch that picks one of nine
    * source buffers (WRAM staging areas or compiled-in BG tilemap

@@ -198,6 +198,28 @@ void ppu_free(Ppu* ppu) {
   free(ppu);
 }
 
+void PpuSetCustomSpriteOamContexts(Ppu *ppu, const uint8_t *contexts) {
+  memcpy(ppu->customSpriteContextByOam, contexts, sizeof(ppu->customSpriteContextByOam));
+}
+
+void PpuClearCustomSpriteOamContexts(Ppu *ppu) {
+  memset(ppu->customSpriteContextByOam, 0, sizeof(ppu->customSpriteContextByOam));
+}
+
+static uint32_t PpuMapRgb(Ppu *ppu, uint16_t color) {
+  return ppu->brightnessMult[color & 0x1f] << 16 |
+         ppu->brightnessMult[(color >> 5) & 0x1f] << 8 |
+         ppu->brightnessMult[(color >> 10) & 0x1f];
+}
+
+static uint16_t PpuResolveRenderedColor(Ppu *ppu, uint sub, uint i) {
+  PpuZbufType pixel = ppu->bgBuffers[sub].data[i];
+  uint16_t color = ppu->objCustomColor.data[i];
+  if ((pixel & 0xff) && pixel == ppu->objBuffer.data[i] && (color & 0x8000))
+    return color & 0x7fff;
+  return ppu->cgram[pixel & 0xff];
+}
+
 /*
  * ppu_reset — Initialise the PPU to a known "powered-on" state.
  *
@@ -237,6 +259,9 @@ void ppu_reset(Ppu* ppu) {
   ppu->objTileAdr2 = 0x5000;
   ppu->objSize = 0;
   memset(&ppu->objBuffer, 0, sizeof(ppu->objBuffer));
+  memset(&ppu->objCustomColor, 0, sizeof(ppu->objCustomColor));
+  memset(ppu->customSpriteContextByOam, 0, sizeof(ppu->customSpriteContextByOam));
+  memset(ppu->customSpriteContexts, 0, sizeof(ppu->customSpriteContexts));
   for(int i = 0; i < 4; i++) {
     ppu->bgLayer[i].hScroll = 0;
     ppu->bgLayer[i].vScroll = 0;
@@ -468,6 +493,7 @@ void ppu_runLine(Ppu *ppu, int line) {
     }
     // evaluate sprites
     ClearBackdrop(&ppu->objBuffer);
+    memset(&ppu->objCustomColor, 0, sizeof(ppu->objCustomColor));
     // Sprites are evaluated against scanline (line - 1) because OAM
     // y-coordinates are one less than the line they appear on (SNES
     // hardware uses "y of top edge"; line 1 displays the pixel at y == 0).
@@ -1423,10 +1449,7 @@ static void PpuDrawWideHudOverlay(Ppu *ppu, uint y, uint32 *dst_org) {
 
     if (pixel) {
       pixel += (tile & 0x1c00) >> 8;
-      uint32 color = ppu->cgram[pixel];
-      dst[out_x] = ppu->brightnessMult[color & 0x1f] << 16 |
-                   ppu->brightnessMult[(color >> 5) & 0x1f] << 8 |
-                   ppu->brightnessMult[(color >> 10) & 0x1f];
+      dst[out_x] = PpuMapRgb(ppu, ppu->cgram[pixel]);
     } else if (ppu->wideHudShadowSize && PpuHasWideHudShadowSource(ppu, bg_x, bg_y)) {
       dst[out_x] = 0;
     }
@@ -1542,7 +1565,9 @@ static void PpuDrawMode7Upsampled(Ppu *ppu, uint y) {
     for (size_t i = 0; i < draw_width; i++, dst += 16) {
       uint32 pixel = pixels[i] & 0xff;
       if (pixel) {
-        uint32 color = ppu->colorMapRgb[pixel];
+        uint16_t customColor = ppu->objCustomColor.data[kPpuExtraLeftRight - ppu->extraLeftCur + i];
+        uint32 color = (customColor & 0x8000) ?
+          PpuMapRgb(ppu, customColor & 0x7fff) : ppu->colorMapRgb[pixel];
         ((uint32 *)dst)[3] = ((uint32 *)dst)[2] = ((uint32 *)dst)[1] = ((uint32 *)dst)[0] = color;
         ((uint32 *)(dst + pitch * 1))[3] = ((uint32 *)(dst + pitch * 1))[2] = ((uint32 *)(dst + pitch * 1))[1] = ((uint32 *)(dst + pitch * 1))[0] = color;
         ((uint32 *)(dst + pitch * 2))[3] = ((uint32 *)(dst + pitch * 2))[2] = ((uint32 *)(dst + pitch * 2))[1] = ((uint32 *)(dst + pitch * 2))[0] = color;
@@ -1668,7 +1693,7 @@ static void PpuCompositeLine(Ppu *ppu, uint y, uint32 math_enabled, bool rendere
       // Math is disabled (or has no effect), so can avoid the per-pixel maths check
       uint32 i = left;
       do {
-        uint32 color = ppu->cgram[ppu->bgBuffers[0].data[i] & 0xff];
+        uint32 color = PpuResolveRenderedColor(ppu, 0, i);
         dst[0] = ppu->brightnessMult[color & clip_color_mask] << 16 |
                  ppu->brightnessMult[(color >> 5) & clip_color_mask] << 8 |
                  ppu->brightnessMult[(color >> 10) & clip_color_mask];
@@ -1680,7 +1705,7 @@ static void PpuCompositeLine(Ppu *ppu, uint y, uint32 math_enabled, bool rendere
       // Need to check for each pixel whether to use math or not based on the main screen layer.
       uint32 i = left;
       do {
-        uint32 color = ppu->cgram[ppu->bgBuffers[0].data[i] & 0xff], color2;
+        uint32 color = PpuResolveRenderedColor(ppu, 0, i), color2;
         uint8 main_layer = (ppu->bgBuffers[0].data[i] >> 8) & 0xf;
         uint32 r = color & clip_color_mask;
         uint32 g = (color >> 5) & clip_color_mask;
@@ -1689,7 +1714,7 @@ static void PpuCompositeLine(Ppu *ppu, uint y, uint32 math_enabled, bool rendere
         if (math_enabled_cur & (1 << main_layer)) {
           if (math_enabled_cur & 0x100) {  // addSubscreen ?
             if ((ppu->bgBuffers[1].data[i] & 0xff) != 0)
-              color2 = ppu->cgram[ppu->bgBuffers[1].data[i] & 0xff], color_map = half_color_map;
+              color2 = PpuResolveRenderedColor(ppu, 1, i), color_map = half_color_map;
             else  // Don't halve if ppu->addSubscreen && backdrop
               color2 = fixed_color;
           } else {
@@ -2018,7 +2043,8 @@ static int ppu_getPixel(Ppu *ppu, int x, int y, bool sub, int *r, int *g, int *b
       break;
     }
   }
-  uint16_t color = ppu->cgram[pixel & 0xff];
+  uint16_t customColor = layer == 4 ? ppu->objCustomColor.data[x + kPpuExtraLeftRight] : 0;
+  uint16_t color = (customColor & 0x8000) ? (customColor & 0x7fff) : ppu->cgram[pixel & 0xff];
   *r = color & 0x1f;
   *g = (color >> 5) & 0x1f;
   *b = (color >> 10) & 0x1f;
@@ -2316,6 +2342,12 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     // get some data for the sprite and y-flip row if needed
     int oam1 = ppu->oam[index + 1];
     int objAdr = (oam1 & 0x100) ? ppu->objTileAdr2 : ppu->objTileAdr1;
+    uint8_t customContextId = ppu->customSpriteContextByOam[index >> 1];
+    PpuCustomSpriteContext *customContext =
+      (customContextId && customContextId <= kPpuCustomSpriteContexts) ?
+      &ppu->customSpriteContexts[customContextId - 1] : NULL;
+    if (customContext && !customContext->enabled)
+      customContext = NULL;
     if (oam1 & 0x8000)
       row = spriteSize - 1 - row;
     // fetch all tiles in x-range
@@ -2332,20 +2364,29 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
         // figure out which tile this uses, looping within 16x16 pages, and get it's data
         int usedCol = oam1 & 0x4000 ? spriteSize - 1 - col : col;
         int usedTile = ((((oam1 & 0xff) >> 4) + (row >> 3)) << 4) | (((oam1 & 0xf) + (usedCol >> 3)) & 0xf);
-        uint16 *addr = &ppu->vram[(objAdr + usedTile * 16 + (row & 0x7)) & 0x7fff];
+        int tileWord = usedTile * 16 + (row & 0x7);
+        uint16 *addr = (customContext && objAdr == ppu->objTileAdr1) ?
+          &customContext->tiles[tileWord & 0xfff] :
+          (customContext && objAdr == ppu->objTileAdr2) ?
+          &customContext->tiles[0x1000 + (tileWord & 0xfff)] :
+          &ppu->vram[(objAdr + tileWord) & 0x7fff];
         uint32 plane = addr[0] | addr[8] << 16;
         // go over each pixel
         int px_left = IntMax(-(col + x + kPpuExtraLeftRight), 0);
         int px_right = IntMin(256 + kPpuExtraLeftRight - (col + x), 8);
         PpuZbufType *dst = ppu->objBuffer.data + col + x + px_left + kPpuExtraLeftRight;
+        uint16_t *customDst = ppu->objCustomColor.data + col + x + px_left + kPpuExtraLeftRight;
         
-        for (int px = px_left; px < px_right; px++, dst++) {
+        for (int px = px_left; px < px_right; px++, dst++, customDst++) {
           int shift = oam1 & 0x4000 ? px : 7 - px;
           uint32 bits = plane >> shift;
           int pixel = (bits >> 0) & 1 | (bits >> 7) & 2 | (bits >> 14) & 4 | (bits >> 21) & 8;
           // draw it in the buffer if there is a pixel here, and the buffer there is still empty
-          if (pixel != 0 && (dst[0] & 0xff) == 0)
+          if (pixel != 0 && (dst[0] & 0xff) == 0) {
             dst[0] = z + pixel;
+            if (customContext)
+              customDst[0] = 0x8000 | customContext->colors[(paletteBase - 0x80) + pixel];
+          }
         }
       }
     }

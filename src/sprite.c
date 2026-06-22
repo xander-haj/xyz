@@ -51,6 +51,8 @@
 #include "tile_detect.h"
 #include "sprite_main.h"
 #include "assets.h"
+#include "zelda_rtl.h"
+#include "snes/ppu.h"
 
 // Upper bounds for each of the six OAM regions. When a region's base pointer
 // reaches this value, the allocator overflows and cycles through kOamGetBufferPos_Tab1.
@@ -66,6 +68,80 @@ static const uint16 kOamGetBufferPos_Tab1[48] = {
 // Frame-skip masks applied to the recoil movement. Indexed by (sprite_F>>2).
 // A value of 0 means move every frame; 3 means move every 4th frame (slow recoil).
 static const uint8 kSprite2_ReturnIfRecoiling_Masks[6] = {3, 1, 0, 0, 0xc, 3};
+
+enum {
+  kOwCustomSpriteNoContext = 0xff,
+  kOwCustomSpriteBlocks = 0x1000,
+  kOwCustomSpriteExtMagic0 = 0xfe,
+  kOwCustomSpriteExtMagic1 = 0x4f,
+  kOwCustomSpriteExtMagic2 = 0x57,
+};
+
+static uint8 ow_custom_sprite_gfx[kOwCustomSpriteBlocks];
+static uint8 ow_custom_sprite_palette[kOwCustomSpriteBlocks];
+static uint8 ow_custom_sprite_flags[kOwCustomSpriteBlocks];
+static uint8 sprite_custom_context[16];
+static uint8 oam_custom_context[128];
+static uint8 active_custom_context;
+
+static void Sprite_CustomClearSlot(int k);
+static void Sprite_CustomSetSlotFromBlock(int k, uint16 blk);
+static void Sprite_CustomBeginSlot(int k);
+static void Sprite_CustomEndSlot(void);
+
+void Sprite_CustomOamMark(int oam_index) {
+  if (active_custom_context && (unsigned)oam_index < countof(oam_custom_context))
+    oam_custom_context[oam_index] = active_custom_context;
+}
+
+void Sprite_CustomSyncOamToPpu(struct Ppu *ppu) {
+  if (ppu)
+    PpuSetCustomSpriteOamContexts(ppu, oam_custom_context);
+}
+
+static void Sprite_CustomClearSlot(int k) {
+  if ((unsigned)k < countof(sprite_custom_context)) {
+    sprite_custom_context[k] = 0;
+    if (g_zenv.ppu)
+      g_zenv.ppu->customSpriteContexts[k].enabled = false;
+  }
+}
+
+static void Sprite_CustomSetSlotFromBlock(int k, uint16 blk) {
+  if ((unsigned)k >= countof(sprite_custom_context))
+    return;
+  sprite_custom_context[k] = 0;
+  if (blk >= kOwCustomSpriteBlocks || ow_custom_sprite_gfx[blk] == kOwCustomSpriteNoContext)
+    return;
+  if (!g_zenv.ppu)
+    return;
+  int context = k + 1;
+  PpuCustomSpriteContext *dst = &g_zenv.ppu->customSpriteContexts[k];
+  LoadOverworldSpriteCustomContext(dst->tiles, dst->colors,
+                                   ow_custom_sprite_gfx[blk],
+                                   ow_custom_sprite_palette[blk],
+                                   (ow_custom_sprite_flags[blk] & 1) != 0);
+  dst->enabled = true;
+  sprite_custom_context[k] = context;
+}
+
+static void Sprite_CustomBeginSlot(int k) {
+  active_custom_context = (unsigned)k < countof(sprite_custom_context) ?
+      sprite_custom_context[k] : 0;
+}
+
+static void Sprite_CustomEndSlot(void) {
+  active_custom_context = 0;
+}
+
+// Converts the overworld sprite-list x/y bytes into the same proximity block key
+// used by the vanilla loader so visual sidecar records attach to the exact spawn.
+static uint16 Overworld_SpriteBlockFromRecord(uint8 x, uint8 y) {
+  uint8 r2 = (y >> 4) << 2;
+  uint8 r6 = (x >> 4) + r2;
+  uint8 r5 = x & 0xf | y << 4;
+  return r5 | r6 << 8;
+}
 
 // 32 hitbox presets indexed by sprite_flags4[k] & 0x1f.
 // XLo/XHi together form a signed 9-bit offset added to sprite_x_lo/x_hi.
@@ -1551,6 +1627,7 @@ void Sprite_Main() {  // 868328
   if (submodule_index == 0)
     drag_player_x = drag_player_y = 0;
   Oam_ResetRegionBases();
+  memset(oam_custom_context, 0, sizeof(oam_custom_context));
   Garnish_ExecuteUpperSlots();
   Follower_Main();
   byte_7E0FB2 = flag_is_sprite_to_pick_up;
@@ -1571,7 +1648,9 @@ void Sprite_Main() {  // 868328
   archery_game_out_of_arrows = 0;
   for (int i = 15; i >= 0; i--) {
     cur_object_index = i;
+    Sprite_CustomBeginSlot(i);
     Sprite_ExecuteSingle(i);
+    Sprite_CustomEndSlot();
   }
   Garnish_ExecuteLowerSlots();
   byte_7E069E[0] = byte_7E069E[1] = 0;
@@ -1700,6 +1779,7 @@ void Sprite_ExecuteSingle(int k) {  // 8684e2
 //   Outdoors: sprite_N_word[k] = 0xFFFF (marks both bytes as unoccupied).
 //   Indoors : sprite_N[k]      = 0xFF   (marks the single room-list byte).
 void Sprite_inactiveSprite(int k) {  // 868510
+  Sprite_CustomClearSlot(k);
   if (!player_is_indoors) {
     sprite_N_word[k] = 0xffff;
   } else {
@@ -2127,6 +2207,7 @@ void Sprite_PrepAndDrawSingleLargeNoPrep(int k, PrepOamCoordsRet *info) {  // 86
     oam->flags = info->flags;
   }
   bytewise_extended_oam[oam - oam_buf] = 2 | ((info->x >= 256) ? 1: 0);
+  Sprite_CustomOamMark(oam - oam_buf);
   if (sprite_flags3[k] & 0x10)
     SpriteDraw_Shadow(k, info);
 }
@@ -2856,6 +2937,11 @@ bool Sprite_CheckTileProperty(int k, int j) {  // 86e73c
   }
 
   int b = Sprite_GetTileAttribute(k, &x, y);
+
+  // Deep water is swim terrain for Link, but ordinary ground sprites need it to block movement.
+  // Flying sprites and water-special sprites keep their explicit handling below.
+  if (!player_is_indoors && b == 8 && !(sprite_flags2[k] & 0x20) && !(sprite_flags5[k] & 0x40))
+    return true;
 
   if (sprite_defl_bits[k] & 8) {
     uint8 a = kSprite_SimplifiedTileAttr[b];
@@ -5085,8 +5171,10 @@ void Dungeon_CacheTransSprites() {  // 89c176
 // - Garnish slots 0-29: cleared.
 void Sprite_DisableAll() {  // 89c22f
   for (int k = 15; k >= 0; k--) {
-    if (sprite_state[k] && (player_is_indoors || sprite_type[k] != 0x6c))
+    if (sprite_state[k] && (player_is_indoors || sprite_type[k] != 0x6c)) {
       sprite_state[k] = 0;
+      Sprite_CustomClearSlot(k);
+    }
   }
   for (int k = 9; k >= 0; k--)
     ancilla_type[k] = 0;
@@ -5244,6 +5332,11 @@ void Sprite_ResetAll_noDisable() {  // 89c452
     super_bomb_indicator_unk2 = 0xfe;
   memset(sprite_where_in_room, 0, 0x1000);
   memset(overworld_sprite_was_loaded, 0, 0x200);
+  memset(ow_custom_sprite_gfx, kOwCustomSpriteNoContext, sizeof(ow_custom_sprite_gfx));
+  memset(ow_custom_sprite_palette, 0, sizeof(ow_custom_sprite_palette));
+  memset(ow_custom_sprite_flags, 0, sizeof(ow_custom_sprite_flags));
+  memset(sprite_custom_context, 0, sizeof(sprite_custom_context));
+  memset(oam_custom_context, 0, sizeof(oam_custom_context));
   memset(dungeon_room_history, 0xff, 8);
 }
 
@@ -5271,28 +5364,54 @@ void Sprite_OverworldReloadAll_justLoad() {  // 89c49d
 // Sets up the sprite-collision bounding box (sprcoll_x/y_base, sprcoll_x/y_size) from
 // the area index so proximity checks are correctly clamped to this area's world extent.
 // Reads the packed overworld sprite list from GetOverworldSpritePtr(overworld_area_index):
-//   - Each record is 3 bytes: [tile_row/col_packed, tile_col/offset, type].
-//   - type == 0xF4: increments byte_7E0FFD (hidden-secret counter) and skips placement.
-//   - Otherwise: computes a 16-bit map key (r5 | r6<<8) from the tile coordinates and
-//     writes (type + 1) into sprite_where_in_overworld[key] to register the sprite at
-//     that overworld tile for proximity-based activation later.
-// Terminates on the 0xFF sentinel byte in the first record byte.
+//   - Each vanilla placement record is 3 bytes: [y, x, type].
+//   - x/y are six-bit local sprite-grid coordinates; high bits are ignored.
+//   - type == 0xF4: increments byte_7E0FFD (falling-rocks marker) and skips placement.
+//   - Otherwise: computes a 16-bit map key from the tile coordinates and writes
+//     (type + 1) into sprite_where_in_overworld[key] for proximity activation.
+// Optional custom visual records are stored after the normal 0xFF terminator as:
+//   0xFE, 'O', 'W', count, [y, x, source_gfx, source_palette, flags]...
+// Keeping custom data after the sentinel preserves the vanilla placement stream.
 void Overworld_LoadSprites() {  // 89c4ac
   sprcoll_x_base = (overworld_area_index & 7) << 9;
   sprcoll_y_base = ((overworld_area_index & 0x3f) >> 2 & 0xe) << 8;
   sprcoll_x_size = sprcoll_y_size = kOverworldAreaSprcollSizes[BYTE(overworld_area_index)] << 8;
-  const uint8 *src = GetOverworldSpritePtr(overworld_area_index);
-  uint8 b;
+  memset(ow_custom_sprite_gfx, kOwCustomSpriteNoContext, sizeof(ow_custom_sprite_gfx));
+  memset(ow_custom_sprite_palette, 0, sizeof(ow_custom_sprite_palette));
+  memset(ow_custom_sprite_flags, 0, sizeof(ow_custom_sprite_flags));
+  const uint8 *list = GetOverworldSpritePtr(overworld_area_index);
+  const uint8 *src = list;
 
-  for (; (b = src[0]) != 0xff; src += 3) {
-    if (src[2] == 0xf4) {
+  for (;;) {
+    uint8 raw_y = src[0];
+    if (raw_y == 0xff)
+      break;
+    uint8 y = raw_y & 0x3f;
+    uint8 x = src[1] & 0x3f;
+    uint8 type = src[2];
+    if (type == 0xf4) {
       byte_7E0FFD++;
+      src += 3;
       continue;
     }
-    uint8 r2 = (src[0] >> 4) << 2;
-    uint8 r6 = (src[1] >> 4) + r2;
-    uint8 r5 = src[1] & 0xf | src[0] << 4;
-    sprite_where_in_overworld[r5 | r6 << 8] = src[2] + 1;
+    uint16 blk = Overworld_SpriteBlockFromRecord(x, y);
+    sprite_where_in_overworld[blk] = type + 1;
+    src += 3;
+  }
+
+  if (src != list &&
+      src[1] == kOwCustomSpriteExtMagic0 &&
+      src[2] == kOwCustomSpriteExtMagic1 &&
+      src[3] == kOwCustomSpriteExtMagic2) {
+    const uint8 *ext = src + 5;
+    for (int i = src[4]; i; i--, ext += 5) {
+      uint16 blk = Overworld_SpriteBlockFromRecord(ext[1] & 0x3f, ext[0] & 0x3f);
+      if (blk < kOwCustomSpriteBlocks && sprite_where_in_overworld[blk]) {
+        ow_custom_sprite_gfx[blk] = ext[2];
+        ow_custom_sprite_palette[blk] = ext[3];
+        ow_custom_sprite_flags[blk] = ext[4];
+      }
+    }
   }
 }
 
@@ -5493,6 +5612,7 @@ void Overworld_LoadProximaSpriteIfAlive(uint16 blk) {  // 89c739
     sprite_floor[k] = 0;
     sprite_subtype[k] = 0;
     sprite_die_action[k] = 0;
+    Sprite_CustomSetSlotFromBlock(k, blk);
   }
 }
 
@@ -5660,6 +5780,7 @@ void Sprite_KillSelf(int k) {  // 89f1f8
     sprite_N_word[k] = 0xffff;
   else
     sprite_N[k] = 0xff;
+  Sprite_CustomClearSlot(k);
 }
 
 // Initializes all gameplay properties for sprite slot k from the static init tables
@@ -6049,6 +6170,7 @@ int Sprite_SpawnDynamically(int k, uint8 what, SpriteSpawnInfo *info) {  // 9df6
 int Sprite_SpawnDynamicallyEx(int k, uint8 what, SpriteSpawnInfo *info, int j) {  // 9df65f
   do {
     if (sprite_state[j] == 0) {
+      Sprite_CustomClearSlot(j);
       sprite_type[j] = what;
       sprite_state[j] = 9;
       info->r0_x = Sprite_GetX(k);

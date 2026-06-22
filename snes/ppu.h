@@ -106,6 +106,23 @@ typedef struct PpuPixelPrioBufs {
   PpuZbufType data[kPpuXPixels];
 } PpuPixelPrioBufs;
 
+enum {
+  kPpuCustomSpriteContexts = 16,
+  kPpuCustomSpriteTileWords = 0x2000,
+  kPpuCustomSpritePaletteWords = 0x80,
+};
+
+typedef struct PpuPixelColorBufs {
+  // Bit 15 set means this pixel uses the lower 15 bits as a direct SNES color.
+  uint16_t data[kPpuXPixels];
+} PpuPixelColorBufs;
+
+typedef struct PpuCustomSpriteContext {
+  bool enabled;
+  uint16_t tiles[kPpuCustomSpriteTileWords];
+  uint16_t colors[kPpuCustomSpritePaletteWords];
+} PpuCustomSpriteContext;
+
 /*
  * Render feature flags — bitfield passed to PpuBeginDrawing() and stored
  * in ppu->renderFlags. These select between rendering paths and toggle
@@ -250,6 +267,9 @@ struct Ppu {
   uint8_t brightnessMult[32 + 31]; // Brightness LUT (31 extra entries avoid clamping)
   uint8_t brightnessMultHalf[32 * 2]; // Half-brightness LUT for half-color math
   uint16_t cgram[0x100];  // Color Generator RAM: 256 palette entries (15-bit BGR)
+  uint8_t customSpriteContextByOam[128]; // 1-based custom sprite context per OAM entry.
+  PpuPixelColorBufs objCustomColor; // Direct-color companion for custom OBJ pixels.
+  PpuCustomSpriteContext customSpriteContexts[kPpuCustomSpriteContexts];
   int16_t mosaicModulo[kPpuXPixels]; // Precomputed mosaic column grouping per pixel
   uint32_t colorMapRgb[256]; // Palette mapped to output RGB format (after brightness)
   PpuPixelPrioBufs bgBuffers[2]; // Scanline render buffers for background layers
@@ -302,5 +322,7 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom,
                           PpuWidescreenBorderFillMode fill_mode, bool fill_before_bg3);
 void PpuSetRenderWideHud(Ppu *ppu, bool enabled, bool anchor_bg3, const uint16_t *tilemap,
                          const uint8_t *tile_offsets, uint8_t shadow_size);
+void PpuSetCustomSpriteOamContexts(Ppu *ppu, const uint8_t *contexts);
+void PpuClearCustomSpriteOamContexts(Ppu *ppu);
 
 #endif  // ZELDA3_SNES_PPU_H_

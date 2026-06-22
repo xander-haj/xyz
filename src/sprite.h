@@ -94,6 +94,9 @@ typedef struct DrawMultipleData {
   uint8 ext;            // Extended OAM bit: 0 = 8x8 tile, 2 = 16x16 tile
 } DrawMultipleData;
 
+struct Ppu;
+void Sprite_CustomOamMark(int oam_index);
+void Sprite_CustomSyncOamToPpu(struct Ppu *ppu);
 
 /*
  * Return flags from Sprite_CheckDamageFromLink indicating how the
@@ -121,6 +124,7 @@ static inline void SetOamHelper0(OamEnt *oam, uint16 x, uint16 y, uint8 charnum,
   oam->charnum = charnum;
   oam->flags = flags;
   bytewise_extended_oam[oam - oam_buf] = big | (x >> 8 & 1);
+  Sprite_CustomOamMark(oam - oam_buf);
 }
 
 /*
@@ -134,6 +138,7 @@ static inline void SetOamHelper1(OamEnt *oam, uint16 x, uint8 y, uint8 charnum, 
   oam->charnum = charnum;
   oam->flags = flags;
   bytewise_extended_oam[oam - oam_buf] = big | (x >> 8 & 1);
+  Sprite_CustomOamMark(oam - oam_buf);
 }
 
 /*
@@ -147,6 +152,7 @@ static inline void SetOamPlain(OamEnt *oam, uint8 x, uint8 y, uint8 charnum, uin
   oam->charnum = charnum;
   oam->flags = flags;
   bytewise_extended_oam[oam - oam_buf] = big;
+  Sprite_CustomOamMark(oam - oam_buf);
 }
 
 

@@ -214,6 +214,9 @@
     <ClCompile Include="src\overlord.c">
       <Filter>Zelda</Filter>
     </ClCompile>
+    <ClCompile Include="src\overworld_gravestones.c">
+      <Filter>Zelda</Filter>
+    </ClCompile>
     <ClCompile Include="src\player.c">
       <Filter>Zelda</Filter>
     </ClCompile>
@@ -412,6 +415,9 @@
       <Filter>Zelda</Filter>
     </ClInclude>
     <ClInclude Include="src\overlord.h">
+      <Filter>Zelda</Filter>
+    </ClInclude>
+    <ClInclude Include="src\overworld_gravestones.h">
       <Filter>Zelda</Filter>
     </ClInclude>
     <ClInclude Include="src\overworld.h">

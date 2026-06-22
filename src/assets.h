@@ -1,7 +1,7 @@
 /*
- * assets.h — Compiled Game Asset Registry
+ * assets.h - Compiled Game Asset Registry
  *
- * Provides typed macro accessors for all 165 game assets extracted from the
+ * Provides typed macro accessors for all 168 game assets extracted from the
  * original Zelda: A Link to the Past ROM. Assets are compiled into a single
  * binary blob (zelda3_assets.dat) by the Python asset pipeline
  * (assets/compile_resources.py), then loaded at runtime into two parallel
@@ -35,13 +35,14 @@
  *   130-156: Exit data and special exit tables (screen transitions)
  *   157-162: Overworld secrets and overworld sprite placement
  *   163-164: Tile attribute lookup tables
+ *   165-167: Generated overworld gravestone tables
  */
 #pragma once
 #include "types.h"
 
 // Total number of distinct asset entries in the compiled asset file.
 enum {
-  kNumberOfAssets = 165
+  kNumberOfAssets = 168
 };
 // Runtime asset storage: pointers to each asset's data within the loaded blob.
 extern const uint8 *g_asset_ptrs[kNumberOfAssets];
@@ -484,4 +485,13 @@ extern MemBlk FindInAssetArray(int asset, int idx);
 #define kMap8DataToTileAttr_SIZE (g_asset_sizes[163])
 #define kSomeTileAttr ((uint8*)g_asset_ptrs[164])
 #define kSomeTileAttr_SIZE (g_asset_sizes[164])
-#define kAssets_Sig 90, 101, 108, 100, 97, 51, 95, 118, 48, 32, 32, 32, 32, 32, 10, 0, 27, 174, 233, 45, 74, 174, 252, 50, 49, 27, 153, 197, 27, 43, 216, 197, 132, 101, 173, 169, 36, 108, 15, 155, 176, 169, 57, 131, 174, 101, 51, 207
+#define kGeneratedOverworldGravestoneX ((uint16*)g_asset_ptrs[165])
+#define kGeneratedOverworldGravestoneX_SIZE (g_asset_sizes[165])
+#define kGeneratedOverworldGravestoneY ((uint16*)g_asset_ptrs[166])
+#define kGeneratedOverworldGravestoneY_SIZE (g_asset_sizes[166])
+#define kGeneratedOverworldGravestoneTilemapPos ((uint16*)g_asset_ptrs[167])
+#define kGeneratedOverworldGravestoneTilemapPos_SIZE (g_asset_sizes[167])
+#define kAssets_Sig \
+  90, 101, 108, 100, 97, 51, 95, 118, 48, 32, 32, 32, 32, 32, 10, 0, \
+  208, 232, 250, 209, 208, 246, 225, 83, 248, 140, 20, 234, 28, 14, 250, 100, \
+  81, 127, 141, 56, 161, 189, 89, 212, 200, 188, 136, 239, 168, 208, 82, 197

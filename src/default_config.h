@@ -114,7 +114,7 @@ static const char kDefaultZelda3Ini[] =
   "LoadRef = 1,2,3,4,5,6,7,8,9,0,-,=,Backspace\n"
   "\n"
   "[GamepadMap]\n"
-  "Controls = DpadUp, DpadDown, DpadLeft, DpadRight, select, Start, B, A, Y, X, Lb, Rb\n"
+  "Controls = DpadUp, DpadDown, DpadLeft, DpadRight, Select, Start, B, A, Y, X, Lb, Rb\n"
   "NewSettingsMenu = L2\n";
 
 #endif  // ZELDA3_DEFAULT_CONFIG_H_

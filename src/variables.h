@@ -776,9 +776,9 @@
  * OVERWORLD AREA AND SCROLL VARIABLES (0x700-0x726)
  *
  * Overworld map geometry: area index, scroll boundaries, and flags
- * tracking whether the current area is a "big" (2x2 screen) area.
- * The overworld is organized as a grid of 64 screens; big areas
- * span four screens that scroll seamlessly.
+ * tracking whether the current area uses expanded screen geometry.
+ * The overworld is organized as a grid of screens; expanded areas can
+ * span both axes, only the X axis, or only the Y axis.
  * ====================================================================== */
 #define current_area_of_player (*(uint16*)(g_ram+0x700))
 #define overworld_offset_base_y (*(uint16*)(g_ram+0x708))
@@ -789,6 +789,7 @@
 #define overworld_area_is_big (*(uint16*)(g_ram+0x712))
 #define overworld_area_is_big_backup (*(uint8*)(g_ram+0x714))
 #define overworld_right_bottom_bound_for_scroll (*(uint16*)(g_ram+0x716))
+#define overworld_right_bound_for_scroll (*(uint16*)(g_ram+0x718))
 // Variable-width font (VWF) rendering state for dialogue text
 #define vwf_flag_next_line (*(uint16*)(g_ram+0x720))
 #define vwf_curline (*(uint16*)(g_ram+0x722))

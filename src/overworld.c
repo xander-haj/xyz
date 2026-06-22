@@ -86,14 +86,6 @@ static PlayerHandlerFunc *const kOverworld_EntranceSequence[5] = {
 #define map16_decode_last (*(uint16*)(g_ram+0x14440))
 #define map16_decode_tmp (*(uint16*)(g_ram+0x14442))
 #endif
-static const uint16 kSecondaryOverlayPerOw[128] = {
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0x1c0c, 0x1c0c, 0, 0, 0, 0, 0, 0, 0x1c0c, 0x1c0c, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0x3b0, 0x180c, 0x180c, 0x288, 0, 0, 0, 0, 0, 0x180c, 0x180c, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1ab6, 0x1ab6, 0, 0xe2e, 0xe2e, 0, 0, 0,
-  0x1ab6, 0x1ab6, 0, 0xe2e, 0xe2e, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x3b0, 0, 0, 0x288,
-  0, 0, 0, 0, 0, 0, 0, 0,
-};
 #define XY(x, y) ((y)*64+(x))
 // this alternate entry point is for scrolling OW area loads
 // b/c drawing a door only applies to when you transition from a dungeon to the OW
@@ -131,7 +123,6 @@ const uint8 kVariousPacks[16] = {
   0x42, 0x43, 0x44, 0x45, 0x3f, 0x59, 0x0b, 0x5a
 };
 static const uint16 kSpecialSwitchAreaB_Map8[3] = { 0x17c, 0x1e4, 0xad };
-static const uint16 kSpecialSwitchAreaB_Screen[3] = { 0x80, 0x80, 0x81 };
 static const uint16 kSpecialSwitchAreaB_Direction[3] = { 4, 1, 4 };
 static const int16 kSwitchAreaTab0[4] = { 0xf80, 0xf80, 0x3f, 0x3f };
 static const int16 kSwitchAreaTab1[256] = {
@@ -153,8 +144,8 @@ static const int16 kSwitchAreaTab1[256] = {
   0x2000, 0x2040, 0x1000, 0x1000, 0x1000, 0x2000, 0x2040, 0x1000, 0x2000, 0x2040, 0x1000, 0x1000, 0x1000, 0x2000, 0x2040, 0x1000,
 };
 static const int16 kSwitchAreaTab3[4] = { 2, -2, 16, -16 };
-// kOverworldAreaHeads[i] != i for subregions of a big area
-static const uint8 kOverworldAreaHeads[64] = {
+// Used only when an old asset pack lacks the generated parent-id tail.
+static const uint8 kVanillaOverworldAreaHeads[64] = {
   0,  0,  2,  3,  3,  5,  5,  7,
   0,  0, 10,  3,  3,  5,  5, 15,
   16, 17, 18, 19, 20, 21, 22, 23,
@@ -164,10 +155,20 @@ static const uint8 kOverworldAreaHeads[64] = {
   48, 48, 50, 51, 52, 53, 53, 55,
   48, 48, 58, 59, 60, 53, 53, 63,
 };
-static const uint16 kOverworld_Size1[2] = { 0x11e, 0x31e };
-static const uint16 kOverworld_Size2[2] = { 0x100, 0x300 };
-static const uint16 kOverworld_UpDownScrollSize[2] = { 0x2e0, 0x4e0 };
-static const uint16 kOverworld_LeftRightScrollSize[2] = { 0x300, 0x500 };
+static const uint16 kOverworld_SizeY[4] = { 0x11e, 0x31e, 0x11e, 0x31e };
+static const uint16 kOverworld_SizeX[4] = { 0x100, 0x300, 0x300, 0x100 };
+static const uint16 kOverworld_UpDownScrollSize[4] = { 0x2e0, 0x4e0, 0x2e0, 0x4e0 };
+static const uint16 kOverworld_LeftRightScrollSize[4] = { 0x300, 0x500, 0x500, 0x300 };
+enum {
+  kOwAreaSizeSmall = 0,
+  kOwAreaSizeBig = 1,
+  kOwAreaSizeWide = 2,
+  kOwAreaSizeTall = 3,
+  kOwAreaSizeOffset = 192,
+  kOwAreaParentOffset = 384,
+  kOwStaticOverlayOffsetTable = 576,
+  kOwStaticOverlayDataOffset = 896,
+};
 static const int16 kOverworld_Func6B_Tab1[4] = { -8, 8, -8, 8 };
 static const int16 kOverworld_Func6B_Tab2[4] = { 27, 27, 30, 30 };
 static const int16 kOverworld_Func6B_Tab3[4] = { -0x70, 0x70, -0x70, 0x70 };
@@ -251,6 +252,42 @@ static PlayerHandlerFunc *const kModule_PreOverworld[3] = {
  * skip when the visual widescreen path is active. */
 static bool Overworld_ShouldUseOpenWorldTransitions() {
   return (enhanced_features0 & (kFeatures0_ExtendScreen64 | kFeatures0_WidescreenVisualFixes)) != 0;
+}
+
+static uint8 Overworld_GetAreaSize(uint8 area) {
+  if (kOverworldMapIsSmall_SIZE > kOwAreaSizeOffset + area)
+    return kOverworldMapIsSmall[kOwAreaSizeOffset + area] & 3;
+  if (area < kOverworldMapIsSmall_SIZE)
+    return kOverworldMapIsSmall[area] ? kOwAreaSizeSmall : kOwAreaSizeBig;
+  return kOwAreaSizeSmall;
+}
+
+static uint8 Overworld_GetAreaParent(uint8 area) {
+  if (kOverworldMapIsSmall_SIZE > kOwAreaParentOffset + area)
+    return kOverworldMapIsSmall[kOwAreaParentOffset + area];
+  if (area < 0x80)
+    return (area & 0x40) | kVanillaOverworldAreaHeads[area & 0x3f];
+  return area;
+}
+
+static bool Overworld_AreaSpansX(uint8 size) {
+  return size == kOwAreaSizeBig || size == kOwAreaSizeWide;
+}
+
+static bool Overworld_AreaSpansY(uint8 size) {
+  return size == kOwAreaSizeBig || size == kOwAreaSizeTall;
+}
+
+static bool Overworld_IsAreaSmall(uint8 area) {
+  return Overworld_GetAreaSize(area) == kOwAreaSizeSmall;
+}
+
+static uint16 Overworld_AreaMaskX(uint8 size) {
+  return Overworld_AreaSpansX(size) ? 0x7e : 0x3e;
+}
+
+static uint16 Overworld_AreaMaskY(uint8 size) {
+  return Overworld_AreaSpansY(size) ? 0x3f0 : 0x1f0;
 }
 
 /* Resolve the ambient loop for an overworld screen. During Zelda's rescue
@@ -363,18 +400,37 @@ uint16 Overworld_GetSignText(int area) {
 
 /* GetOverworldSpritePtr — Return the per-area sprite list, choosing
  * one of three banks based on game progress: bank 0 pre-Master-Sword,
- * bank 1 after, bank 2 post-Agahnim. The 144-area stride encodes
- * each progress bank's offset table. */
+ * bank 1 after, bank 2 post-Agahnim. The 160-area stride encodes
+ * each progress bank's offset table across every ZScream OW map slot. */
 const uint8 *GetOverworldSpritePtr(int area) {
+  if (area < 0 || area >= 160)
+    return kOverworldSprites;
   int base = (sram_progress_indicator == 3) ? 2 :
     (sram_progress_indicator == 2) ? 1 : 0;
-  return kOverworldSprites + kOverworldSpriteOffs[area + base * 144];
+  return kOverworldSprites + kOverworldSpriteOffs[area + base * 160];
 }
 
-/* GetOverworldBgPalette — Trivial lookup wrapper around
- * kOverworldBgPalettes for callers that only need read access. */
+/* GetOverworldBgPalette — Safely read the generated overworld BG palette
+ * assignment table, returning palette 0 for out-of-range bootstrap callers. */
 uint8 GetOverworldBgPalette(int idx) {
-  return kOverworldBgPalettes[idx];
+  if (idx >= 0 && idx < kOverworldBgPalettes_SIZE)
+    return kOverworldBgPalettes[idx];
+  return 0;
+}
+
+/* Special-overworld exits bootstrap through LoadOverworldFromDungeon before
+ * Overworld_EnterSpecialArea reapplies the full kSpExit_* context. Avoid
+ * reading past the normal 128-entry aux-theme table during that handoff. */
+static uint8 Overworld_GetAuxTileThemeIndex(uint8 screen) {
+  if (screen < kOverworldAuxTileThemeIndexes_SIZE)
+    return kOverworldAuxTileThemeIndexes[screen];
+  uint16 room = dungeon_room_index;
+  if (room >= 0x180 && room < 0x190) {
+    uint16 slot = room - 0x180;
+    if (slot < kSpExit_AuxGfx_SIZE)
+      return kSpExit_AuxGfx[slot];
+  }
+  return 0;
 }
 
 /* Sprite_LoadGraphicsProperties — Populate the live overworld sprite
@@ -599,7 +655,7 @@ setsong:
   DecompressAnimatedOverworldTiles(ow_anim_tiles);
   InitializeTilesets();
   OverworldLoadScreensPaletteSet();
-  Overworld_LoadPalettes(kOverworldBgPalettes[sc], overworld_sprite_palettes[sc]);
+  Overworld_LoadPalettes(GetOverworldBgPalette(sc), overworld_sprite_palettes[sc]);
   Palette_SetOwBgColor();
   if (main_module_index == 8) {
     Overworld_LoadPalettesInner();
@@ -1114,7 +1170,7 @@ void OverworldHandleTransitions() {  // 82a9c4
   if (link_x_vel != 0) {
     dir = link_direction & 3;
     t = link_x_coord - kOverworld_OffsetBaseX[BYTE(current_area_of_player) >> 1];
-    if ((y = 2, x = 2, t < 6) || (y = 0, x = 1, t >= (uint16)(overworld_right_bottom_bound_for_scroll + 4))) {
+    if ((y = 2, x = 2, t < 6) || (y = 0, x = 1, t >= (uint16)(overworld_right_bound_for_scroll + 4))) {
 compare:
       if (x == dir && !Link_CheckForEdgeScreenTransition())
         goto after;
@@ -1133,7 +1189,7 @@ after:
   if (old_screen == 0x2a)
     sound_effect_ambient = 0x80;
 
-  uint8 new_area = kOverworldAreaHeads[pushed] | savegame_is_darkworld;
+  uint8 new_area = Overworld_GetAreaParent(pushed | savegame_is_darkworld);
   BYTE(overworld_screen_index) = new_area;
   BYTE(overworld_area_index) = new_area;
   if (!savegame_is_darkworld || link_item_moon_pearl) {
@@ -1158,7 +1214,7 @@ after:
     mosaic_level = 0;
   } else {
     uint8 sc = overworld_screen_index;
-    Overworld_LoadPalettes(kOverworldBgPalettes[sc], overworld_sprite_palettes[sc]);
+    Overworld_LoadPalettes(GetOverworldBgPalette(sc), overworld_sprite_palettes[sc]);
     Overworld_CopyPalettesToCache();
   }
 }
@@ -1179,11 +1235,14 @@ void Overworld_LoadGFXAndScreenSize() {  // 82ab08
   int i = BYTE(overworld_screen_index);
   incremental_counter_for_vram = 0;
   sprite_graphics_index = overworld_sprite_gfx[i];
-  aux_tile_theme_index = kOverworldAuxTileThemeIndexes[i];
+  aux_tile_theme_index = Overworld_GetAuxTileThemeIndex(i);
 
   overworld_area_is_big_backup = overworld_area_is_big;
-  BYTE(overworld_area_is_big) = kOverworldMapIsSmall[i & 0x3f] ? 0 : 0x20;
-  ((uint8 *)&overworld_right_bottom_bound_for_scroll)[1] = kOverworldMapIsSmall[i & 0x3f] ? 1 : 3;
+  uint8 area_size = Overworld_GetAreaSize(i);
+  BYTE(overworld_area_is_big) = area_size == kOwAreaSizeSmall ? 0 : 0x20;
+  ((uint8 *)&overworld_right_bottom_bound_for_scroll)[1] =
+      Overworld_AreaSpansY(area_size) ? 3 : 1;
+  ((uint8 *)&overworld_right_bound_for_scroll)[1] = Overworld_AreaSpansX(area_size) ? 3 : 1;
   main_tile_theme_index = overworld_screen_index & 0x40 ? 0x21 : 0x20;
   misc_sprites_graphics_index = kVariousPacks[6 + (overworld_screen_index & 0x40 ? 8 : 0)];
 
@@ -1191,18 +1250,19 @@ void Overworld_LoadGFXAndScreenSize() {  // 82ab08
   overworld_offset_base_y = kOverworld_OffsetBaseY[j];
   overworld_offset_base_x = kOverworld_OffsetBaseX[j] >> 3;
 
-  int m = overworld_area_is_big ? 0x3f0 : 0x1f0;
-  overworld_offset_mask_y = m;
-  overworld_offset_mask_x = m >> 3;
+  overworld_offset_mask_y = Overworld_AreaMaskY(area_size);
+  overworld_offset_mask_x = Overworld_AreaMaskX(area_size);
 }
 
 void Overworld_SetMap16LoadOffsetToCamera() {
-  if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
+  if (Overworld_IsAreaSmall(BYTE(overworld_screen_index))) {
     map16_load_src_off = 0x390;
   } else {
     int i = overworld_screen_index & 0xbf;
-    uint16 y = (BG2VOFS_copy2 - kOverworld_OffsetBaseY[i]) & 0x3f0;
-    uint16 x = ((BG2HOFS_copy2 >> 3) - (kOverworld_OffsetBaseX[i] >> 3)) & 0x7e;
+    uint8 area_size = Overworld_GetAreaSize(BYTE(overworld_screen_index));
+    uint16 y = (BG2VOFS_copy2 - kOverworld_OffsetBaseY[i]) & Overworld_AreaMaskY(area_size);
+    uint16 x = ((BG2HOFS_copy2 >> 3) - (kOverworld_OffsetBaseX[i] >> 3)) &
+        Overworld_AreaMaskX(area_size);
     map16_load_src_off = ((y << 3) + x + 0x390) & 0x1fff;
   }
   map16_load_var2 = (map16_load_src_off - 0x400 & 0xf80) >> 7;
@@ -1219,7 +1279,7 @@ static bool Overworld_GetWidescreenSideSpace(int *extra_left_out, int *extra_rig
     return false;
 
   int target_extra = g_config.extended_aspect_ratio;
-  if (kOverworldMapIsSmall[BYTE(overworld_screen_index)])
+  if (!Overworld_AreaSpansX(Overworld_GetAreaSize(BYTE(overworld_screen_index))))
     return false;
 
   int avail_left = IntMax(BG2HOFS_copy2 - ow_scroll_vars0.xstart, 0);
@@ -1242,7 +1302,7 @@ static int Overworld_GetWidescreenExtraLeft() {
 }
 
 static void Overworld_SetMap16LoadOffsetToWideCamera() {
-  if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
+  if (Overworld_IsAreaSmall(BYTE(overworld_screen_index))) {
     map16_load_src_off = 0x390;
   } else {
     uint16 x_origin = BG2HOFS_copy2 - Overworld_GetWidescreenExtraLeft();
@@ -1254,13 +1314,25 @@ static void Overworld_SetMap16LoadOffsetToWideCamera() {
   map16_load_dst_off = (map16_load_src_off - 0x10 & 0x3e) >> 1;
 }
 
+static uint8 Overworld_GetSpecialWorldExitScreen(int slot) {
+  uint16 room = 0x180 + slot;
+  for (int i = 0; i < kExitDataRooms_SIZE / sizeof(uint16); i++) {
+    if (kExitDataRooms[i] == room)
+      return kExitData_ScreenIndex[i];
+  }
+  return 0x80 + (slot == 2);
+}
+
 /*
  * ScrollAndCheckForSOWExit — Continues any in-progress map scroll,
  * then probes the map16 tile under Link against three special-area
- * exit triples (kSpecialSwitchAreaB_*). When a match is found on the
- * current overworld screen, sets up an SOW (Special Overworld) exit
- * by setting submodule 36, latching the prescribed direction, and
- * clearing the dungeon-room index so the next scene loads as overworld.
+ * exit triples. The return screen is resolved from the compiled exit
+ * rows for rooms 0x180..0x182 so edits to those Exits rows also retarget
+ * the special-overworld exit check, matching ZScream's OWExitSW behavior.
+ * When a match is found on the current overworld screen, sets up an SOW
+ * (Special Overworld) exit by setting submodule 36, latching the prescribed
+ * direction, and clearing the dungeon-room index so the next scene loads as
+ * overworld.
  */
 void ScrollAndCheckForSOWExit() {  // 82ab7b
   if (BYTE(overworld_screen_trans_dir_bits2))
@@ -1269,7 +1341,8 @@ void ScrollAndCheckForSOWExit() {  // 82ab7b
   const uint16 *map8 = Overworld_GetMap16OfLink_Mult8();
   int a = map8[0] & 0x1ff;
   for (int i = 2; i >= 0; i--) {
-    if (kSpecialSwitchAreaB_Map8[i] == a && kSpecialSwitchAreaB_Screen[i] == overworld_screen_index) {
+    if (kSpecialSwitchAreaB_Map8[i] == a &&
+        Overworld_GetSpecialWorldExitScreen(i) == overworld_screen_index) {
       link_direction = kSpecialSwitchAreaB_Direction[i];
       byte_7E069C = overworld_screen_transition = DirToEnum(link_direction);
       submodule_index = 36;
@@ -1387,7 +1460,7 @@ static void Overworld_FinishScrollTransitionInstantly() {
   if (submodule_index == 6)
     return;
 
-  if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
+  if (Overworld_IsAreaSmall(BYTE(overworld_screen_index))) {
     BYTE(overworld_screen_trans_dir_bits2) = dir;
     OverworldTransitionScrollAndLoadMap();
     Overworld_ApplyPendingOWScrollUpload();
@@ -1487,7 +1560,7 @@ static void Overworld_BuildWideScreenTilemap(bool redraw_screen) {
   Overworld_SetMap16LoadOffsetToWideCamera();
   Map16ToMap8(&g_ram[0x2000], 0);
 
-  if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
+  if (Overworld_IsAreaSmall(BYTE(overworld_screen_index))) {
     map16_load_var2 = bak3;
     map16_load_dst_off = bak2;
     map16_load_src_off = bak1;
@@ -1555,7 +1628,7 @@ static void Overworld_RebuildScreenForInstantTransition() {
   uint16 bak1 = map16_load_src_off;
   uint16 bak2 = map16_load_dst_off;
   uint16 bak3 = map16_load_var2;
-  bool small_map = kOverworldMapIsSmall[BYTE(overworld_screen_index)];
+  bool small_map = Overworld_IsAreaSmall(BYTE(overworld_screen_index));
 
   Overworld_DrawQuadrantsAndOverlays();
   Overworld_SetMap16LoadOffsetToWideCamera();
@@ -1595,7 +1668,7 @@ void Overworld_StartScrollTransition() {  // 82ac27
  * tagalongs do not visibly drift during the cleanup).
  */
 void Overworld_EaseOffScrollTransition() {  // 82ac3a
-  if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
+  if (Overworld_IsAreaSmall(BYTE(overworld_screen_index))) {
     BYTE(overworld_screen_trans_dir_bits2) = BYTE(overworld_screen_trans_dir_bits);
     OverworldTransitionScrollAndLoadMap();
     BYTE(overworld_screen_trans_dir_bits2) = 0;
@@ -1608,7 +1681,7 @@ void Overworld_EaseOffScrollTransition() {  // 82ac3a
   subsubmodule_index = 0;
   BYTE(overworld_screen_trans_dir_bits) = 0;
 
-  if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
+  if (Overworld_IsAreaSmall(BYTE(overworld_screen_index))) {
     map16_load_src_off = orange_blue_barrier_state;
     map16_load_dst_off = word_7EC174;
     map16_load_var2 = word_7EC176;
@@ -1929,7 +2002,7 @@ void Module09_FadeBackInFromMosaic() {  // 82b0d2
   switch (subsubmodule_index) {
   case 0: {
     uint8 sc = overworld_screen_index;
-    Overworld_LoadPalettes(kOverworldBgPalettes[sc], overworld_sprite_palettes[sc]);
+    Overworld_LoadPalettes(GetOverworldBgPalette(sc), overworld_sprite_palettes[sc]);
     Overworld_PrimeWideScreenTilemap();
     OverworldMosaicTransition_LoadSpriteGraphicsAndSetMosaic();
     break;
@@ -2130,7 +2203,7 @@ void Overworld_DrawScreenAtCurrentMirrorPosition() {  // 82b2e6
   uint16 bak1 = map16_load_src_off;
   uint16 bak2 = map16_load_dst_off;
   uint16 bak3 = map16_load_var2;
-  if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
+  if (Overworld_IsAreaSmall(BYTE(overworld_screen_index))) {
     map16_load_src_off = 0x390;
     map16_load_var2 = (0x390 - 0x400 & 0xf80) >> 7;
     map16_load_dst_off = (0x390 - 0x10 & 0x3e) >> 1;
@@ -2161,7 +2234,7 @@ void MirrorWarp_LoadSpritesAndColors() {  // 82b334
   uint16 bak1 = map16_load_src_off;
   uint16 bak2 = map16_load_dst_off;
   uint16 bak3 = map16_load_var2;
-  if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
+  if (Overworld_IsAreaSmall(BYTE(overworld_screen_index))) {
     map16_load_src_off = 0x390;
     map16_load_var2 = (0x390 - 0x400 & 0xf80) >> 7;
     map16_load_dst_off = (0x390 - 0x10 & 0x3e) >> 1;
@@ -2172,7 +2245,7 @@ void MirrorWarp_LoadSpritesAndColors() {  // 82b334
   map16_load_src_off = bak1;
   OverworldLoadScreensPaletteSet();
   uint8 sc = overworld_screen_index;
-  Overworld_LoadPalettes(kOverworldBgPalettes[sc], overworld_sprite_palettes[sc]);
+  Overworld_LoadPalettes(GetOverworldBgPalette(sc), overworld_sprite_palettes[sc]);
   Palette_SpecialOw();
   Overworld_SetFixedColAndScroll();
   if (BYTE(overworld_screen_index) == 0x1b || BYTE(overworld_screen_index) == 0x5b)
@@ -2287,7 +2360,7 @@ void Module09_2E_Whirlpool() {  // 82b40f
     Palette_Load_HUD();
     Palette_Load_OWBGMain();
     uint8 sc = overworld_screen_index;
-    Overworld_LoadPalettes(kOverworldBgPalettes[sc], overworld_sprite_palettes[sc]);
+    Overworld_LoadPalettes(GetOverworldBgPalette(sc), overworld_sprite_palettes[sc]);
     Palette_SetOwBgColor();
     Overworld_SetFixedColAndScroll();
     LoadNewSpriteGFXSet();
@@ -2586,7 +2659,9 @@ int OverworldScrollTransition() {  // 82c001
     camera_x_coord_scroll_low = camera_x_coord_scroll_hi + 2;
     overworld_unk3 = overworld_unk3_neg = 0;
   }
-  Overworld_SetCameraBoundaries(overworld_area_is_big != 0, (current_area_of_player >> 1) + kOverworld_Func6B_AreaDelta[y]);
+  Overworld_SetCameraBoundaries(
+      Overworld_GetAreaSize(BYTE(overworld_screen_index)),
+      (current_area_of_player >> 1) + kOverworld_Func6B_AreaDelta[y]);
 
   flag_overworld_area_did_change = 1;
   submodule_index += 1;
@@ -2597,22 +2672,20 @@ int OverworldScrollTransition() {  // 82c001
 }
 
 /*
- * Overworld_SetCameraBoundaries — Recompute the four scroll-window
- * extents (ystart/yend, xstart/xend), the up/down BG2 scroll-target
- * pair, and the left/right scroll-target pair for the given overworld
- * area. The `big` flag picks between the small-area and big-area
- * size constants in kOverworld_Size{1,2} and the corresponding
- * UpDown/LeftRight scroll-size tables.
+ * Overworld_SetCameraBoundaries — Recompute scroll extents and BG2 targets
+ * for the requested area-size enum. The enum matches ZScream's expanded
+ * topology table: small, big, wide, and tall.
  */
-void Overworld_SetCameraBoundaries(int big, int area) {  // 82c0c3
+void Overworld_SetCameraBoundaries(int area_size, int area) {  // 82c0c3
+  area_size &= 3;
   ow_scroll_vars0.ystart = kOverworld_OffsetBaseY[area];
-  ow_scroll_vars0.yend = ow_scroll_vars0.ystart + kOverworld_Size1[big];
+  ow_scroll_vars0.yend = ow_scroll_vars0.ystart + kOverworld_SizeY[area_size];
   ow_scroll_vars0.xstart = kOverworld_OffsetBaseX[area];
-  ow_scroll_vars0.xend = ow_scroll_vars0.xstart + kOverworld_Size2[big];
+  ow_scroll_vars0.xend = ow_scroll_vars0.xstart + kOverworld_SizeX[area_size];
   up_down_scroll_target = kOverworld_UpDownScrollTarget[area];
-  up_down_scroll_target_end = up_down_scroll_target + kOverworld_UpDownScrollSize[big];
+  up_down_scroll_target_end = up_down_scroll_target + kOverworld_UpDownScrollSize[area_size];
   left_right_scroll_target = kOverworld_LeftRightScrollTarget[area];
-  left_right_scroll_target_end = left_right_scroll_target + kOverworld_LeftRightScrollSize[big];
+  left_right_scroll_target_end = left_right_scroll_target + kOverworld_LeftRightScrollSize[area_size];
 }
 
 /*
@@ -2781,8 +2854,10 @@ void Overworld_LoadNewScreenProperties() {  // 82e58b
   tilemap_location_calc_mask = ~7;
   Overworld_LoadGFXAndScreenSize();
   BYTE(overworld_right_bottom_bound_for_scroll) = 0xe4;
+  BYTE(overworld_right_bound_for_scroll) = 0xe4;
   overworld_area_is_big &= 0xff;
-  Overworld_SetCameraBoundaries(overworld_area_is_big != 0, overworld_screen_index & 0x3f);
+  Overworld_SetCameraBoundaries(
+      Overworld_GetAreaSize(BYTE(overworld_screen_index)), overworld_screen_index & 0x3f);
   link_quadrant_x = 0;
   link_quadrant_y = 2;
   quadrant_fullsize_x = 2;
@@ -2962,7 +3037,7 @@ void LoadOverworldFromSpecialOverworld() {  // 82e9bc
   sprite_graphics_index = sprite_graphics_index_spexit;
   Overworld_SetMap16LoadOffsetToCamera();
   uint8 sc = overworld_screen_index;
-  Overworld_LoadPalettes(kOverworldBgPalettes[sc], overworld_sprite_palettes[sc]);
+  Overworld_LoadPalettes(GetOverworldBgPalette(sc), overworld_sprite_palettes[sc]);
   Palette_SpecialOw();
   link_quadrant_x = 0;
   link_quadrant_y = 2;
@@ -2975,6 +3050,7 @@ void LoadOverworldFromSpecialOverworld() {  // 82e9bc
   Link_ResetSwimmingState();
   Overworld_LoadGFXAndScreenSize();
   BYTE(overworld_right_bottom_bound_for_scroll) = 228;
+  BYTE(overworld_right_bound_for_scroll) = 228;
   overworld_area_is_big &= 0xff;
 }
 
@@ -3032,7 +3108,7 @@ void Overworld_LoadBirdTravelPos(int k) {  // 82ec47
 void FluteMenu_LoadSelectedScreenPalettes() {  // 82ecdd
   OverworldLoadScreensPaletteSet();
   uint8 sc = overworld_screen_index;
-  Overworld_LoadPalettes(kOverworldBgPalettes[sc], overworld_sprite_palettes[sc]);
+  Overworld_LoadPalettes(GetOverworldBgPalette(sc), overworld_sprite_palettes[sc]);
   Palette_SetOwBgColor();
   Overworld_LoadPalettesInner();
 }
@@ -3065,7 +3141,7 @@ void Overworld_LoadAmbientOverlay(bool load_map_data) {  // 82ed25
   uint16 bak2 = map16_load_dst_off;
   uint16 bak3 = map16_load_var2;
 
-  if (kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
+  if (Overworld_IsAreaSmall(BYTE(overworld_screen_index))) {
     map16_load_src_off = 0x390;
     map16_load_var2 = (0x390 - 0x400 & 0xf80) >> 7;
     map16_load_dst_off = (0x390 - 0x10 & 0x3e) >> 1;
@@ -3147,15 +3223,71 @@ void Overworld_DrawQuadrantsAndOverlays() {  // 82eec5
 }
 
 /*
- * Overworld_HandleOverlaysAndBombDoors — Per-screen post-draw fixups:
+ * Overworld_FindPersistedBombDoorPos - Return the map16 byte offset for the
+ * bomb-door pair that event bit 0x02 should redraw on this screen.
+ *
+ * ZScream regenerates a ROM side table from Items rows when saving. The runtime
+ * already has those rows in kOverworldSecrets, so scan the current list and keep
+ * the last 0x86-Bombable item to match ZScream's last write.
+ */
+static uint16 Overworld_FindPersistedBombDoorPos() {
+  if (overworld_screen_index >= 0x80)
+    return 0xffff;
+
+  const uint8 *ptr =
+    kOverworldSecrets + kOverworldSecrets_Offs[overworld_screen_index];
+  uint16 bomb_pos = 0xffff;
+  for (;;) {
+    uint16 pos = *(uint16 *)ptr;
+    if (pos == 0xffff)
+      return bomb_pos;
+    if (ptr[2] == 0x86)
+      bomb_pos = pos & 0x7fff;
+    ptr += 3;
+  }
+}
+
+/*
+ * Overworld_LoadStaticOverlayTiles - Apply editable ZScream-style map16 tile
+ * writes compiled into the extended overworld metadata asset tail.
+ */
+static void Overworld_LoadStaticOverlayTiles() {
+  if (kOverworldMapIsSmall_SIZE <= kOwStaticOverlayDataOffset)
+    return;
+
+  uint8 area = BYTE(overworld_screen_index);
+  unsigned int offset_slot = kOwStaticOverlayOffsetTable + area * 2;
+  if (offset_slot + 1 >= kOverworldMapIsSmall_SIZE)
+    return;
+
+  unsigned int offset = kOverworldMapIsSmall[offset_slot] | kOverworldMapIsSmall[offset_slot + 1] << 8;
+  if (kOwStaticOverlayDataOffset + offset >= kOverworldMapIsSmall_SIZE)
+    return;
+  const uint8 *p = kOverworldMapIsSmall + kOwStaticOverlayDataOffset + offset;
+  const uint8 *end = kOverworldMapIsSmall + kOverworldMapIsSmall_SIZE;
+  while (p < end && p[0] != 0xff) {
+    if (p + 3 >= end)
+      break;
+    uint8 x = p[0], y = p[1];
+    uint16 tile = p[2] | p[3] << 8;
+    if (x < 64 && y < 64)
+      dung_bg2[XY(x, y)] = tile;
+    p += 4;
+  }
+}
+
+/*
+ * Overworld_HandleOverlaysAndBombDoors - Per-screen post-draw fixups:
+ *   - Editable ZScream-style static overlay tile writes.
  *   - Screens 0x33 / 0x2f: paint a single map16 tile at a hardcoded
  *     position with id 0x20f (specific scripted tile patches).
  *   - Event-flag bit 0x20: load the full secondary event overlay
  *     (e.g., uncle's body, intro Zelda's-cell tiles).
  *   - Event-flag bit 0x02: place a 2-tile bomb-door pair at the
- *     position read from kSecondaryOverlayPerOw[overworld_screen_index].
+ *     last 0x86-Bombable item in the screen's compiled Items list.
  */
 void Overworld_HandleOverlaysAndBombDoors() {  // 82ef29
+  Overworld_LoadStaticOverlayTiles();
   if (overworld_screen_index == 0x33)
     dung_bg2[340] = 0x20f;
   else if (overworld_screen_index == 0x2f)
@@ -3163,9 +3295,12 @@ void Overworld_HandleOverlaysAndBombDoors() {  // 82ef29
   if (BYTE(overworld_screen_index) < 0x80 && save_ow_event_info[BYTE(overworld_screen_index)] & 0x20)
     Overworld_LoadEventOverlay();
   if (save_ow_event_info[BYTE(overworld_screen_index)] & 2) {
-    int pos = kSecondaryOverlayPerOw[overworld_screen_index] >> 1;
-    dung_bg2[pos + 0] = 0xdb4;
-    dung_bg2[pos + 1] = 0xdb5;
+    uint16 bomb_pos = Overworld_FindPersistedBombDoorPos();
+    if (bomb_pos != 0xffff) {
+      int pos = bomb_pos >> 1;
+      dung_bg2[pos + 0] = 0xdb4;
+      dung_bg2[pos + 1] = 0xdb5;
+    }
   }
 }
 
@@ -3240,7 +3375,7 @@ void SomeTileMapChange() {  // 82efe8
  * scroll-induced reveal.
  */
 void CreateInitialNewScreenMapToScroll() {  // 82f031
-  if (!kOverworldMapIsSmall[BYTE(overworld_screen_index)]) {
+  if (!Overworld_IsAreaSmall(BYTE(overworld_screen_index))) {
     switch (BYTE(overworld_screen_trans_dir_bits2)) {
     case 1: CreateInitialOWScreenView_Big_East(); break;
     case 2: CreateInitialOWScreenView_Big_West(); break;
@@ -3478,7 +3613,7 @@ void OverworldHandleMapScroll() {  // 82f273
 uint16 *CheckForNewlyLoadedMapAreas_North(uint16 *dst) {  // 82f2dd
   if (sign16(map16_load_src_off - 0x80))
     return dst;
-  if (!kOverworldMapIsSmall[overworld_screen_index]) {
+  if (!Overworld_IsAreaSmall(overworld_screen_index)) {
     *dst++ = 0x80;
     dst = BufferAndBuildMap16Stripes_Y(dst);
   }
@@ -3490,7 +3625,7 @@ uint16 *CheckForNewlyLoadedMapAreas_North(uint16 *dst) {  // 82f2dd
 uint16 *CheckForNewlyLoadedMapAreas_South(uint16 *dst) {  // 82f311
   if (map16_load_src_off >= 0x1800)
     return dst;
-  if (!kOverworldMapIsSmall[overworld_screen_index]) {
+  if (!Overworld_IsAreaSmall(overworld_screen_index)) {
     *dst++ = 0x80;
     dst = BufferAndBuildMap16Stripes_Y(dst);
   }
@@ -3505,7 +3640,7 @@ uint16 *CheckForNewlyLoadedMapAreas_West(uint16 *dst) {  // 82f345
     pos -= 0x80;
   if (pos == 0)
     return dst;
-  if (!kOverworldMapIsSmall[overworld_screen_index]) {
+  if (!Overworld_IsAreaSmall(overworld_screen_index)) {
     *dst++ = 0x8040;
     dst = BufferAndBuildMap16Stripes_X(dst);
   }
@@ -3520,7 +3655,7 @@ uint16 *CheckForNewlyLoadedMapAreas_East(uint16 *dst) {  // 82f37f
     pos -= 0x80;
   if (pos >= 0x60)
     return dst;
-  if (!kOverworldMapIsSmall[overworld_screen_index]) {
+  if (!Overworld_IsAreaSmall(overworld_screen_index)) {
     *dst++ = 0x8040;
     dst = BufferAndBuildMap16Stripes_X(dst);
   }

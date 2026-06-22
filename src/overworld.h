@@ -233,7 +233,7 @@ int OverworldCameraBoundaryCheck(int xa, int ya, int vd, int r8);
 // Processes one frame of the scroll transition between screens
 int OverworldScrollTransition();
 // Sets the camera scroll boundaries for the given area (big or small screen)
-void Overworld_SetCameraBoundaries(int big, int area);
+void Overworld_SetCameraBoundaries(int area_size, int area);
 // Completes entry onto a new screen (enables controls, starts music)
 void Overworld_FinalizeEntryOntoScreen();
 // Overworld submodule 0x1F: post-entry finalization handler
