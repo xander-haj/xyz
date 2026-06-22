@@ -50,7 +50,7 @@ jobs:
     - name: Package ${{ matrix.name }} build
       run: |
         mkdir -p "dist/Z3R-${{ matrix.name }}"
-        cp zelda3 zelda3.ini README.md LICENSE.txt "dist/Z3R-${{ matrix.name }}/"
+        cp zelda3 zelda3.ini readme.md LICENSE.txt "dist/Z3R-${{ matrix.name }}/"
         tar -czf "dist/${{ matrix.archive }}" -C "dist/Z3R-${{ matrix.name }}" .
     - name: Build Linux AppImage
       if: ${{ matrix.platform == 'linux' }}
@@ -145,7 +145,7 @@ jobs:
         $packageDir = "dist/Z3R-windows-x64"
         New-Item -ItemType Directory -Force $packageDir | Out-Null
         Copy-Item "bin/x64-Release/zelda3.exe" $packageDir
-        Copy-Item -Path "README.md", "LICENSE.txt", "zelda3.ini" -Destination $packageDir
+        Copy-Item -Path "readme.md", "LICENSE.txt", "zelda3.ini" -Destination $packageDir
 
         $sdlDll = Get-ChildItem -Path "bin", "packages" -Recurse -Filter "SDL2.dll" |
           Where-Object { $_.FullName -match "x64" } |

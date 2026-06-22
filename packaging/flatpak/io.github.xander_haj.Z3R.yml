@@ -25,7 +25,7 @@ modules:
       - install -Dm755 zelda3 /app/bin/zelda3.real
       - install -Dm755 packaging/flatpak/io.github.xander_haj.Z3R /app/bin/z3r
       - install -Dm644 zelda3.ini /app/share/Z3R/zelda3.ini
-      - install -Dm644 README.md /app/share/doc/Z3R/README.md
+      - install -Dm644 readme.md /app/share/doc/Z3R/README.md
       - install -Dm644 LICENSE.txt /app/share/licenses/Z3R/LICENSE.txt
       - install -Dm644 packaging/flatpak/io.github.xander_haj.Z3R.desktop /app/share/applications/io.github.xander_haj.Z3R.desktop
       - install -Dm644 packaging/flatpak/io.github.xander_haj.Z3R.metainfo.xml /app/share/metainfo/io.github.xander_haj.Z3R.metainfo.xml
