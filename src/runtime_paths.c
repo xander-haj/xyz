@@ -11,13 +11,13 @@
 #include "util.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <SDL.h>
 #ifdef _WIN32
 #include <direct.h>
-#define getcwd _getcwd
 #define chdir _chdir
 #else
 #include <sys/stat.h>
@@ -44,6 +44,26 @@ static char g_bps_file[4096];
 static char g_bps_source_rom_file[4096];
 static char g_path_scratch[4096];
 static bool g_use_user_override_config_file;
+
+/* RuntimePath_GetCwd: reads the current working directory with the host CRT.
+ *
+ * Parameters:
+ *   dst      - destination path buffer.
+ *   dst_size - destination capacity.
+ *
+ * Returns dst on success, or NULL when the platform call fails.
+ */
+static char *RuntimePath_GetCwd(char *dst, size_t dst_size) {
+#ifdef _WIN32
+  if (dst_size > (size_t)INT_MAX) {
+    errno = ERANGE;
+    return NULL;
+  }
+  return _getcwd(dst, (int)dst_size);
+#else
+  return getcwd(dst, dst_size);
+#endif
+}
 
 /* RuntimePath_IsAbsolute: checks whether a path is absolute on the host OS.
  *
@@ -88,13 +108,14 @@ static void RuntimePath_Copy(char *dst, size_t dst_size, const char *src) {
  * Returns nothing. Forward slashes are accepted by the Windows CRT too.
  */
 static void RuntimePath_Join(char *dst, size_t dst_size, const char *dir, const char *name) {
+  const char *child = name ? name : "";
   if (!dir || !dir[0]) {
-    RuntimePath_Copy(dst, dst_size, name);
+    RuntimePath_Copy(dst, dst_size, child);
     return;
   }
   size_t len = strlen(dir);
   const char *sep = (len != 0 && (dir[len - 1] == '/' || dir[len - 1] == '\\')) ? "" : "/";
-  snprintf(dst, dst_size, "%s%s%s", dir, sep, name);
+  snprintf(dst, dst_size, "%s%s%s", dir, sep, child);
 }
 
 /* RuntimePath_LastSeparator: finds the final path separator in a path.
@@ -230,7 +251,7 @@ static void RuntimePath_AbsoluteFromCwd(char *dst, size_t dst_size, const char *
     return;
   }
   char cwd[4096];
-  if (!getcwd(cwd, sizeof(cwd))) {
+  if (!RuntimePath_GetCwd(cwd, sizeof(cwd))) {
     RuntimePath_Copy(dst, dst_size, path);
     return;
   }
@@ -365,7 +386,7 @@ static bool RuntimePath_CandidateMatches(const char *dir, bool require_assets) {
  */
 static bool RuntimePath_FindFromCwd(char *dst, size_t dst_size, bool require_assets) {
   char buf[4096];
-  if (!getcwd(buf, sizeof(buf)))
+  if (!RuntimePath_GetCwd(buf, sizeof(buf)))
     return false;
   size_t pos = strlen(buf);
   for (int step = 0; pos != 0 && step < 3; step++) {
@@ -424,7 +445,7 @@ static void RuntimePath_FindRuntimeDir(char *dst, size_t dst_size) {
   if (RuntimePath_FindFromBasePath(dst, dst_size, false))
     return;
 
-  if (!getcwd(dst, dst_size))
+  if (!RuntimePath_GetCwd(dst, dst_size))
     RuntimePath_Copy(dst, dst_size, ".");
 }
 
@@ -550,21 +571,25 @@ const char *RuntimePath_BpsSourceRomFile(void) {
 }
 
 const char *RuntimePath_SaveSlotFile(int which) {
-  snprintf(g_path_scratch, sizeof(g_path_scratch), "%s/save%d.sav", g_save_dir, which);
+  char filename[32];
+  snprintf(filename, sizeof(filename), "save%d.sav", which);
+  RuntimePath_Join(g_path_scratch, sizeof(g_path_scratch), g_save_dir, filename);
   return g_path_scratch;
 }
 
 const char *RuntimePath_ReferenceSaveFile(const char *filename) {
-  snprintf(g_path_scratch, sizeof(g_path_scratch), "%s/saves/ref/%s", g_runtime_dir, filename);
+  char ref_dir[4096];
+  RuntimePath_Join(ref_dir, sizeof(ref_dir), g_runtime_dir, "saves/ref");
+  RuntimePath_Join(g_path_scratch, sizeof(g_path_scratch), ref_dir, filename);
   return g_path_scratch;
 }
 
 const char *RuntimePath_SramFile(void) {
-  snprintf(g_path_scratch, sizeof(g_path_scratch), "%s/sram.dat", g_save_dir);
+  RuntimePath_Join(g_path_scratch, sizeof(g_path_scratch), g_save_dir, "sram.dat");
   return g_path_scratch;
 }
 
 const char *RuntimePath_SramBackupFile(void) {
-  snprintf(g_path_scratch, sizeof(g_path_scratch), "%s/sram.bak", g_save_dir);
+  RuntimePath_Join(g_path_scratch, sizeof(g_path_scratch), g_save_dir, "sram.bak");
   return g_path_scratch;
 }
