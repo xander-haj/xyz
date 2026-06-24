@@ -46,6 +46,8 @@
 #include "player.h"
 // Miscellaneous game module routing and utility functions
 #include "misc.h"
+// Portable rumble event requests
+#include "rumble.h"
 // Dungeon room logic: doors, torch lighting, floor transitions
 #include "dungeon.h"
 // Sprite-specific handlers referenced for special collision cases
@@ -2192,6 +2194,7 @@ label1:
   if (!--ancilla_arr3[k]) {
     if (++ancilla_item_to_link[k] == 1) {
       Ancilla_Sfx2_Pan(k, 0xc);
+      Rumble_RequestBombExplosionBuzz();
       if (k + 1 == flag_is_ancilla_to_pick_up) {
         flag_is_ancilla_to_pick_up = 0;
         if (link_state_bits & 0x80) {
@@ -3309,6 +3312,8 @@ void Ancilla18_EtherSpell(int k) {  // 88aaa0
       }
     }
     ancilla_x_vel[k] += 1;
+    if ((frame_counter & 3) == 0)
+      Rumble_RequestEtherExpandBuzz();
     EtherSpell_HandleRadialSpin(k);
     return;
   } else {
@@ -3349,9 +3354,11 @@ void EtherSpell_HandleLightningStroke(int k) {  // 88ab63
   if (BYTE(ether_y_adjusted) != (y & 0xf0)) {
     BYTE(ether_y_adjusted) = y & 0xf0;
     ancilla_arr25[k]++;  // Extend drawn column by one row.
+    Rumble_RequestEtherLightningBuzz();
   }
   if (y < 0xe000 && ether_y2 < 0xe000 && ether_y2 <= y) {
     ancilla_step[k] = 1;
+    Rumble_RequestEtherPulseBuzz();
   }
   AncillaDraw_EtherBlitz(k);
 }
@@ -3368,6 +3375,7 @@ void EtherSpell_HandleOrbPulse(int k) {  // 88aba7
       return;
     }
     ancilla_arr3[k] = 3;
+    Rumble_RequestEtherPulseBuzz();
     if (!sign8(--ancilla_arr25[k])) {
       AncillaDraw_EtherBlitz(k);
       return;
@@ -3401,12 +3409,16 @@ void EtherSpell_HandleOrbPulse(int k) {  // 88aba7
 void EtherSpell_HandleRadialSpin(int k) {  // 88abef
   if (ancilla_step[k] == 4) {
     // Step 4: play rotating 3-phase SFX pattern.
-    if ((frame_counter & 7) == 0)
+    if ((frame_counter & 7) == 0) {
       sound_effect_2 = 0x2a;
-    else if ((frame_counter & 7) == 4)
+      Rumble_RequestEtherSpinBuzz();
+    } else if ((frame_counter & 7) == 4) {
       sound_effect_2 = 0xaa;
-    else if ((frame_counter & 7) == 7)
+      Rumble_RequestEtherSpinBuzz();
+    } else if ((frame_counter & 7) == 7) {
       sound_effect_2 = 0x6a;
+      Rumble_RequestEtherSpinBuzz();
+    }
   } else {
     // Advance the radius: uses Ancilla_MoveX with x_lo=ether_var2 to apply
     // x_vel as a fixed-point increment.
@@ -3420,6 +3432,11 @@ void EtherSpell_HandleRadialSpin(int k) {  // 88abef
 
   uint8 sb = ancilla_step[k];
   uint8 sa = ancilla_item_to_link[k];
+  if (sb == 3 && (frame_counter & 3) == 0) {
+    Rumble_RequestEtherExpandBuzz();
+  } else if (sb == 5 && (frame_counter & 3) == 0) {
+    Rumble_RequestEtherFadeBuzz();
+  }
   OamEnt *oam = GetOamCurPtr();
   for (int i = 7; i >= 0; i--) {
     if (sb != 2 && sb != 5) {
@@ -3584,6 +3601,7 @@ void AncillaAdd_BombosSpell(uint8 a, uint8 y) {  // 88af66
   ancilla_step[k] = 0;
   ancilla_item_to_link[k] = 0;
   Ancilla_Sfx2_Near(0x2a);
+  Rumble_RequestBombosStartBuzz();
 
   // Pseudo-random column start position, clamped to avoid the far edge.
   uint8 t = kGeneratedBombosArr[frame_counter];
@@ -3667,10 +3685,14 @@ void BombosSpell_ControlFireColumns(int k) {  // 88b10a
 
     if (sign8(--bombos_arr1[i])) {
       bombos_arr1[i] = 3;
-      if (++bombos_arr2[i] == 13)
+      uint8 frame = ++bombos_arr2[i];
+      if (frame == 13)
         continue;
 
-      if (bombos_arr2[i] == 2) {
+      if (frame == 1)
+        Rumble_RequestBombosColumnBuzz();
+
+      if (frame == 2) {
         if (sa)
           continue;
 
@@ -3795,24 +3817,27 @@ void BombosSpell_ControlBlasting(int kk) {  // 88b40d
   for (; k >= 0; k--) {
     if (bombos_arr3[k] != 8 && sign8(--bombos_arr4[k])) {
       bombos_arr4[k] = 3;
-      if (++bombos_arr3[k] == 1 && !bombos_var2) {
-        // Allocate the next blast slot: extend to sb+1 or recycle a done slot.
-        int j = sb;
-        if (j != 15) {
-          j = ++sb;
-        } else {
-          for (; j >= 0 && bombos_arr3[j] != 8; j--) {}
+      if (++bombos_arr3[k] == 1) {
+        Rumble_RequestBombosBlastBuzz();
+        if (!bombos_var2) {
+          // Allocate the next blast slot: extend to sb+1 or recycle a done slot.
+          int j = sb;
+          if (j != 15) {
+            j = ++sb;
+          } else {
+            for (; j >= 0 && bombos_arr3[j] != 8; j--) {}
+          }
+          bombos_arr3[j] = 0;
+          bombos_arr4[j] = 3;
+
+          // Position from kBombosBlasts_Tab pseudo-random table.
+          uint16 y = kBombosBlasts_Tab[frame_counter & 0x3f];
+          uint16 x = kBombosBlasts_Tab[(frame_counter & 0x3f) + 3];
+          bombos_y_coord[j] = y + BG2VOFS_copy2;
+          bombos_x_coord[j] = x + BG2HOFS_copy2;
+
+          sound_effect_1 = 0xc | kBombos_Sfx[bombos_x_coord[j] >> 5 & 7];
         }
-        bombos_arr3[j] = 0;
-        bombos_arr4[j] = 3;
-
-        // Position from kBombosBlasts_Tab pseudo-random table.
-        uint16 y = kBombosBlasts_Tab[frame_counter & 0x3f];
-        uint16 x = kBombosBlasts_Tab[(frame_counter & 0x3f) + 3];
-        bombos_y_coord[j] = y + BG2VOFS_copy2;
-        bombos_x_coord[j] = x + BG2HOFS_copy2;
-
-        sound_effect_1 = 0xc | kBombos_Sfx[bombos_x_coord[j] >> 5 & 7];
       }
     }
     AncillaDraw_BombosBlast(k);
@@ -3973,6 +3998,7 @@ void QuakeSpell_ControlBolts(int k) {  // 88b718
 
       if (j == 0 && quake_arr2[j] == 2) {
         Ancilla_Sfx2_Near(0xc);
+        Rumble_RequestQuakePulseBuzz();
         quake_var5 = 1;
       } else if (j == 1 && quake_arr2[j] == 2) {
         quake_var5 = 4;
@@ -4029,6 +4055,8 @@ void QuakeSpell_SpreadBolts(int k) {  // 88b84f
       ancilla_step[k] = 2;
       return;
     }
+    if ((ancilla_item_to_link[k] & 3) == 1)
+      Rumble_RequestQuakePulseBuzz();
   }
   int t = ancilla_item_to_link[k];
   int idx = kQuakeItemPos2[t], num = kQuakeItemPos2[t + 1] - idx;
@@ -4138,8 +4166,11 @@ void Powder_ApplyDamageToSprites(int k) {  // 88bb58
       if (sprite_head_dir[j] != 0)
         continue;
     }
+    bool transformed = sprite_head_dir[j] == 0;
     sprite_head_dir[j] = 1;
     Sprite_SpawnPoofGarnish(j);
+    if (transformed)
+      Rumble_RequestMagicPowderTransformBuzz();
   }
 }
 
@@ -6973,6 +7004,11 @@ void Ancilla2F_LampFlame(int k) {  // 88ec13
     ancilla_type[k] = 0;
     return;
   }
+  uint8 flame_frame = (ancilla_timer[k] & 0xf8) >> 3;
+  if (ancilla_aux_timer[k] != flame_frame + 1) {
+    ancilla_aux_timer[k] = flame_frame + 1;
+    Rumble_RequestLampFlameBuzz();
+  }
   int j = (ancilla_timer[k] & 0xf8) >> 1;
   do {
     if (kLampFlame_Draw_Char[j] != 0xff) {
@@ -7203,8 +7239,10 @@ void Ancilla3A_BigBombExplosion(int k) {  // 88f18d
   static const int8 kSuperBombExplode_Y[9] = {0, -16, -24, -16, 0, 0, 16, 24, 16};
 
   if (!submodule_index && !--ancilla_arr3[k]) {
-    if (++ancilla_item_to_link[k] == 2)
+    if (++ancilla_item_to_link[k] == 2) {
       Ancilla_Sfx2_Pan(k, 0xc);
+      Rumble_RequestBombExplosionBuzz();
+    }
     if (ancilla_item_to_link[k] == 11) {
       ancilla_type[k] = 0;
       return;
@@ -8457,6 +8495,7 @@ void AncillaAdd_EtherSpell(uint8 a, uint8 y) {  // 8991fc
     load_chr_halfslot_even_odd = 9;
     ether_var1 = 0x40;
     sound_effect_2 = Link_CalculateSfxPan() | 0x26;
+    Rumble_RequestEtherStartBuzz();
     for(int i = 0; i < 8; i++)
       ether_arr1[i] = i * 8;
     ether_y = link_y_coord;
@@ -8694,6 +8733,7 @@ void AncillaAdd_QuakeSpell(uint8 a, uint8 y) {  // 899589
     ancilla_item_to_link[k] = 0;
     load_chr_halfslot_even_odd = 13;
     sound_effect_1 = 0x35;
+    Rumble_RequestQuakeStartBuzz();
     for(int i = 0; i < 5; i++)
       quake_arr2[i] = 0;
     quake_var5 = 0;

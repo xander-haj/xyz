@@ -107,6 +107,7 @@ typedef struct Config {
   uint16 audio_samples;            // SDL audio buffer size in samples
   // --- General Settings ---
   bool autosave;                   // Auto-save SRAM on exit
+  bool enable_rumble;              // Enable controller rumble feedback
   uint8 extended_aspect_ratio;     // Extra horizontal pixels per side for widescreen
   bool extend_y;                   // Extend vertical resolution from 224 to 240
   bool fill_extended_aspect_ratio_borders; // Fill outdoor/dungeon widescreen side padding from edge art

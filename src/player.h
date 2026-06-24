@@ -471,6 +471,8 @@ void Link_HandleDiagonalKickback();
 
 // Main tile detection dispatcher: checks what tile Link is on/facing
 void TileDetect_MainHandler(uint8 item);
+// Sword-specific tile detection dispatcher for slash/dash/spin tile cuts
+void TileDetect_SwordHandler(uint8 item);
 // Returns true if Link is on a slosh-capable surface (shallow water/swamp)
 bool Link_PermissionForSloshSounds();
 // Attempts to push a block at (x,y); returns true if push succeeded
@@ -480,7 +482,7 @@ uint8 Link_HandleLiftables();
 // Nudges Link's position by arg_r0 pixels for wall-alignment correction
 void HandleNudging(int8 arg_r0);
 // Resolves item-vs-tile interaction at (x,y) and executes the tile behavior
-void TileBehavior_HandleItemAndExecute(uint16 x, uint16 y);
+void TileBehavior_HandleItemAndExecute(uint16 x, uint16 y, bool is_sword_slash);
 // Returns the collision flag for the tile a push block would move onto
 uint8 PushBlock_GetTargetTileFlag(uint16 x, uint16 y);
 // Sets slope flags when Link moves vertically into a sloped tile

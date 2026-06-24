@@ -50,6 +50,7 @@
 #include "overlord.h"
 #include "tile_detect.h"
 #include "sprite_main.h"
+#include "rumble.h"
 #include "assets.h"
 #include "zelda_rtl.h"
 #include "snes/ppu.h"
@@ -2447,6 +2448,16 @@ static bool ThrowableScenery_ShouldSkipLostWoodsAirborneCollision(int k) {
           BYTE(overlay_index) == 0x9e);
 }
 
+static bool ThrowableScenery_IsOutdoorBush(int k) {
+  return sprite_type[k] == 0xec && !player_is_indoors &&
+         (sprite_C[k] == 2 || sprite_C[k] == 4);
+}
+
+static bool ThrowableScenery_IsPot(int k) {
+  return sprite_type[k] == 0xec &&
+         (sprite_C[k] == 1 || (player_is_indoors && sprite_C[k] == 2));
+}
+
 // Moves a throwable terrain tile (type 0xEC) one frame: applies X/Y velocity,
 // runs tile collision if not hookshot-lifted (sprite_E == 0), then calls
 // ThrownSprite_TileAndSpriteInteraction to handle wall bounces and sprite hits.
@@ -2505,6 +2516,8 @@ void ThrownSprite_CheckDamageToSingleSprite(int k, int j) {  // 86e1b2
   Sprite_SetupHitBox(j, &hb);
   if (!CheckIfHitBoxesOverlap(&hb))
     return;
+  if (ThrowableScenery_IsOutdoorBush(k))
+    Rumble_RequestBushThrownHitBuzz();
   if (sprite_type[j] == 0x3f) {
     Sprite_PlaceWeaponTink(k);
   } else {
@@ -2546,6 +2559,7 @@ void ThrowableScenery_TransmuteIfValid(int k) {  // 86e22f
 // Calls Sprite_ScheduleForBreakage to start the 31-frame poof death animation.
 void ThrowableScenery_TransmuteToDebris(int k) {  // 86e239
   uint8 a = sprite_graphics[k];
+  bool is_pot = ThrowableScenery_IsPot(k);
   if (a != 0) {
     BYTE(dung_secrets_unk1) = a;
     Sprite_SpawnSecret(k);
@@ -2554,6 +2568,8 @@ void ThrowableScenery_TransmuteToDebris(int k) {  // 86e239
   a = player_is_indoors ? 0 : sprite_C[k];
   sound_effect_1 = 0;
   SpriteSfx_QueueSfx2WithPan(k, kSprite_Func21_Sfx[a]);
+  if (is_pot)
+    Rumble_RequestPotBreakBuzz();
   Sprite_ScheduleForBreakage(k);
 }
 
@@ -3357,6 +3373,11 @@ void Sprite_CalculateSwordDamage(int k) {  // 86ed3f
     damage_type_determiner = 3;
   link_sword_delay_timer = 4;
   set_when_damaging_enemies = 16;
+  if (link_is_running && sprite_type[k] < 0xd8) {
+    uint8 dmg = kEnemyDamages[damage_type_determiner * 8 | enemy_damage_data[sprite_type[k] * 16 | damage_type_determiner]];
+    if (dmg != 0)
+      Rumble_RequestDashAttackBuzz();
+  }
   Sprite_ApplyCalculatedDamage(k, 0x9d);
 }
 
@@ -3394,8 +3415,12 @@ void Sprite_ApplyCalculatedDamage(int k, int a) {  // 86ed89
 void Sprite_GiveDamage(int k, uint8 dmg, uint8 r0_hit_timer) {  // 86edc5
   if (dmg == 249) {
     Sprite_Func18(k, 0xe3);
+    if (damage_type_determiner == 10)
+      Rumble_RequestMagicPowderTransformBuzz();
     return;
   }
+  if (damage_type_determiner == 10 && dmg != 0)
+    Rumble_RequestMagicPowderDamageBuzz();
   if (dmg == 250) {
     Sprite_Func18(k, 0x8f);
     sprite_ai_state[k] = 2;

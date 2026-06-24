@@ -709,6 +709,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     if (StringEqualsNoCase(key, "Autosave")) {
       g_config.autosave = (bool)strtol(value, (char**)NULL, 10);
       return true;
+    } else if (StringEqualsNoCase(key, "EnableRumble")) {
+      return ParseBool(value, &g_config.enable_rumble);
     } else if (StringEqualsNoCase(key, "ExtendedAspectRatio")) {
       // Accepts comma-separated tokens: aspect ratio ("16:9", "16:10",
       // "18:9", "4:3"), "extend_y" (224→240 scanlines),

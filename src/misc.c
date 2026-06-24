@@ -1258,10 +1258,10 @@ void Main_ShowTextMessage() {  // 8ffdaa
 // to the appropriate handler based on whether Link is indoors or on the overworld.
 // Indoors: HandleItemTileAction_Dungeon checks dungeon tile interaction rules.
 // Outdoors: Overworld_ToolAndTileInteraction handles overworld dig/push/bomb responses.
-uint8 HandleItemTileAction_Overworld(uint16 x, uint16 y) {  // 9bbd7a
+uint8 HandleItemTileAction_Overworld(uint16 x, uint16 y, bool is_sword_slash) {  // 9bbd7a
   if (player_is_indoors)
     return HandleItemTileAction_Dungeon(x, y);
   else
-    return Overworld_ToolAndTileInteraction(x, y);
+    return Overworld_ToolAndTileInteraction(x, y, is_sword_slash);
 }
 

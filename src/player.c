@@ -54,6 +54,7 @@
 #include "sprite.h"
 #include "load_gfx.h"
 #include "hud.h"
+#include "rumble.h"
 #include "overworld.h"
 #include "tagalong.h"
 #include "dungeon.h"
@@ -356,6 +357,7 @@ void Link_ControlHandler() {  // 87807f
         if (countdown_for_blink == 0)
           countdown_for_blink = 58;
         Ancilla_Sfx2_Near(38);
+        Rumble_RequestDamageBuzz();
         number_of_times_hurt_by_sprites++;
         uint8 new_dmg = link_health_current - dmg;
         if (new_dmg == 0 || new_dmg >= 0xa8) {
@@ -1702,8 +1704,10 @@ void LinkState_Dashing() {  // 878f86
   uint8 a = link_countdown_for_dash;
   if (a == 0)
     a = index_of_dashing_sfx--;
-  if (!(kDashTab1[link_countdown_for_dash >> 4] & a))
+  if (!(kDashTab1[link_countdown_for_dash >> 4] & a)) {
     Ancilla_Sfx2_Near(35);
+    Rumble_RequestDashStepBuzz();
+  }
   if (sign8(--link_countdown_for_dash)) {
     link_countdown_for_dash = 0;
     if (follower_indicator == kTagalongArr1[follower_indicator])
@@ -1757,7 +1761,7 @@ void LinkState_Dashing() {  // 878f86
   link_spin_attack_step_counter = 0;
 
   if ((uint8)(link_sword_type + 1) & 0xfe)
-    TileDetect_MainHandler(7);
+    TileDetect_SwordHandler(7);
 
   if (sram_progress_indicator) {
     button_mask_b_y |= 0x80;
@@ -1857,6 +1861,7 @@ void RepelDash() {  // 8791f1
     Link_ResetSwimmingState();
     AncillaAdd_DashTremor(29, 1);
     Prepare_ApplyRumbleToSprites();
+    Rumble_RequestDashBonkBuzz();
     if ((sound_effect_2 & 0x3f) != 27 && (sound_effect_2 & 0x3f) != 50)
       Ancilla_Sfx3_Near(3);
     LinkApplyTileRebound();
@@ -2214,6 +2219,9 @@ void HandleDungeonLandingFromPit() {  // 879520
   Player_TileDetectNearby();
   if ((sound_effect_1 & 0x3f) != 0x24)
     Ancilla_Sfx2_Near(0x21);
+  bool landed_on_pit = (tiledetect_pit_tile & 0xf) != 0;
+  if (!landed_on_pit)
+    Rumble_RequestLandingBuzz();
 
   if (dung_hdr_collision_2 == 2 && (tiledetect_water_staircase & 0xf))
     byte_7E0322 = 3;
@@ -2230,7 +2238,7 @@ void HandleDungeonLandingFromPit() {  // 879520
     link_grabbing_wall = 0;
     link_speed_setting = 0;
   } else {
-    link_player_handler_state = (tiledetect_pit_tile & 0xf) ? kPlayerState_FallingIntoHole : kPlayerState_Ground;
+    link_player_handler_state = landed_on_pit ? kPlayerState_FallingIntoHole : kPlayerState_Ground;
   }
 }
 
@@ -2968,7 +2976,7 @@ void Link_CheckForSwordSwing() {  // 879cd9
       if (link_sword_type != 0 && link_sword_type != 1 && link_sword_type != 0xff)
         AncillaAdd_SwordSwingSparkle(0x26, 4);
       if (link_sword_type != 0 && link_sword_type != 0xff)
-        TileDetect_MainHandler(link_sword_type == 1 ? 1 : 6);
+        TileDetect_SwordHandler(link_sword_type == 1 ? 1 : 6);
     } else if (button_b_frames >= 4 && (button_mask_b_y & 1) && (joypad1H_last & kJoypadH_B)) {
       button_mask_b_y &= ~1;
       HandleSwordSfxAndBeam();
@@ -3045,13 +3053,21 @@ void Player_Sword_SpinAttackJerks_HoldDown() {  // 879d9f
             return;
         } while (--i >= 0);
 
-        if (link_spin_attack_step_counter >= 6 && (frame_counter & 3) == 0)
+        if (link_spin_attack_step_counter >= 6 && (frame_counter & 3) == 0) {
           AncillaSpawn_SwordChargeSparkle();
+          if (link_spin_attack_step_counter < 48)
+            Rumble_RequestSpinChargeBuildBuzz();
+        }
 
+        bool reached_full_charge = false;
         if (link_spin_attack_step_counter < 64 && ++link_spin_attack_step_counter == 48) {
           Ancilla_Sfx2_Near(55);
           AncillaAdd_ChargedSpinAttackSparkle();
+          Rumble_RequestSpinChargeReadyBuzz();
+          reached_full_charge = true;
         }
+        if (!reached_full_charge && link_spin_attack_step_counter >= 48 && (frame_counter & 15) == 0)
+          Rumble_RequestSpinChargeHoldBuzz();
       } else {
         CalculateSwordHitBox();
       }
@@ -3157,6 +3173,7 @@ void LinkItem_Hammer() {  // 879f7b
   if (player_handler_timer == 1) {
     TileDetect_MainHandler(3);
     Ancilla_AddHitStars(22, 0);
+    Rumble_RequestHammerBuzz();
     if (sound_effect_1 == 0) {
       Ancilla_Sfx2_Near(16);
       SpawnHammerWaterSplash();
@@ -3761,6 +3778,7 @@ void LinkState_UsingQuake() {  // 87a6d6
  */
 void Link_ActivateSpinAttack() {  // 87a77a
   AncillaAdd_SpinAttackInitSpark(42, 0, 0);
+  Rumble_RequestSpinAttackStartBuzz();
   Link_AnimateVictorySpin();
 }
 
@@ -3858,7 +3876,8 @@ void LinkState_SpinAttack() {  // 87a804
   } else {
     state_for_spin_attack = kLinkSpinGraphicsByDir[step_counter_for_spin_attack + link_spin_offsets];
     link_delay_timer_spin_attack = kLinkSpinDelays[step_counter_for_spin_attack];
-    TileDetect_MainHandler(8);
+    Rumble_RequestSpinAttackSweepBuzz();
+    TileDetect_SwordHandler(8);
   }
 }
 
@@ -6715,7 +6734,17 @@ noHorizOrNoVertical:
  *     outdoors -> mirror trigger). Otherwise sets the visual
  *     "wading through grass" overlay flag.
  */
+static void TileDetect_MainHandlerWithContext(uint8 item, bool is_sword_slash);
+
 void TileDetect_MainHandler(uint8 item) {  // 87d077
+  TileDetect_MainHandlerWithContext(item, false);
+}
+
+void TileDetect_SwordHandler(uint8 item) {  // 87d077
+  TileDetect_MainHandlerWithContext(item, true);
+}
+
+static void TileDetect_MainHandlerWithContext(uint8 item, bool is_sword_slash) {
   tiledetect_pit_tile = 0;
   TileDetect_ResetState();
   uint16 o;
@@ -6737,7 +6766,7 @@ void TileDetect_MainHandler(uint8 item) {  // 87d077
   uint16 y = ((link_y_coord + kDoSwordInteractionWithTiles_y[o]) & tilemap_location_calc_mask);
 
   if (item == 1 || item == 2 || item == 3 || item == 6 || item == 7 || item == 8) {
-    TileBehavior_HandleItemAndExecute(x, y);
+    TileBehavior_HandleItemAndExecute(x, y, is_sword_slash);
     return;
   }
 
@@ -7028,8 +7057,8 @@ void HandleNudging(int8 arg_r0) {  // 87d485
  * Overworld to get the tile attribute, then re-runs the inner
  * tile-detect dispatcher with that attribute.
  */
-void TileBehavior_HandleItemAndExecute(uint16 x, uint16 y) {  // 87dc4a
-  uint8 tile = HandleItemTileAction_Overworld(x, y);
+void TileBehavior_HandleItemAndExecute(uint16 x, uint16 y, bool is_sword_slash) {  // 87dc4a
+  uint8 tile = HandleItemTileAction_Overworld(x, y, is_sword_slash);
   TileDetect_ExecuteInner(tile, 0, 1, false);
 }
 

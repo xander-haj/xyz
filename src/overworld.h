@@ -408,7 +408,7 @@ void Overworld_UseEntrance();
 // -----------------------------------------------------------------------
 
 // Processes tool/item interaction with the tile at world coords (x, y)
-uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y);
+uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y, bool is_sword_slash);
 // Selects the appropriate hammer sound effect based on tile type a
 void Overworld_PickHammerSfx(uint16 a);
 // Returns Link's current Map16 tile index and writes pixel coords to xy

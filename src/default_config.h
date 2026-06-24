@@ -21,6 +21,7 @@ static const char kDefaultZelda3Ini[] =
   "[General]\n"
   "Autosave = 0\n"
   "DisplayPerfInTitle = 0\n"
+  "EnableRumble = 0\n"
   "ExtendedAspectRatio = 16:9\n"
   "FillExtendedAspectRatioBorders = 1\n"
   "DisableFrameDelay = 0\n"

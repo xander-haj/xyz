@@ -6,6 +6,7 @@
 #include "sprite.h"
 #include "ancilla.h"
 #include "player.h"
+#include "rumble.h"
 #include "misc.h"
 #include "messaging.h"
 #include "player_oam.h"
@@ -4871,7 +4872,7 @@ after:
  * three "find secret -> store new tile -> redraw" code paths into
  * one place.
  */
-uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y) {  // 9bbd82
+uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y, bool is_sword_slash) {  // 9bbd82
   word_7E04B2 = 0;
   index_of_interacting_tile = 0;
   uint16 pos = ((y - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
@@ -4923,6 +4924,8 @@ memoize_getout:
       if (index_of_interacting_tile) {
         Sprite_SpawnImmediatelySmashedTerrain(index_of_interacting_tile, scratch_0, scratch_1);
         AncillaAdd_BushPoof(scratch_0, scratch_1);
+        if (is_sword_slash)
+          Rumble_RequestBushSlashBuzz();
       }
       return attr;
     }

@@ -52,6 +52,7 @@
 #include "zelda_cpu_infra.h"
 
 #include "config.h"
+#include "rumble.h"
 #include "runtime_paths.h"
 #include "features.h"
 #include "hud.h"
@@ -78,7 +79,11 @@ static void HandleCommand(uint32 j, bool pressed);
 static int RemapSdlButton(int button);
 static void HandleGamepadInput(int button, bool pressed);
 static void HandleGamepadAxisInput(int gamepad_id, int axis, int value);
+static void ConfigureRumbleHints(void);
 static void OpenOneGamepad(int i);
+static void CloseAllGamepads(void);
+static void CloseGamepadByInstanceId(SDL_JoystickID instance_id);
+static void MarkActiveGamepad(SDL_JoystickID instance_id);
 static bool CaptureNewSettingsKey(SDL_Keycode key, SDL_Keymod mod);
 static void HandleVolumeAdjustment(int volume_adjustment);
 static void LoadAssets();
@@ -94,7 +99,18 @@ enum {
   kDefaultFreq = 44100,
   kDefaultChannels = 2,
   kDefaultSamples = 2048,
+  kMaxOpenGamepads = 16,
 };
+
+typedef struct OpenGamepad {
+  SDL_GameController *controller;
+  SDL_JoystickID instance_id;
+#if SDL_VERSION_ATLEAST(2, 0, 9)
+  bool controller_rumble_ready;
+#endif
+  SDL_Haptic *haptic;
+  bool haptic_rumble_ready;
+} OpenGamepad;
 
 /* Window title used both for the SDL window and as the prefix for the
  * "title with FPS" overlay when g_config.display_perf_title is enabled. */
@@ -151,6 +167,10 @@ static uint32 g_gamepad_modifiers;
  * release event needs to fire the same command as the matching press
  * even if the chord modifiers have since changed. */
 static uint16 g_gamepad_last_cmd[kGamepadBtn_Count];
+static OpenGamepad g_open_gamepads[kMaxOpenGamepads];
+static int g_open_gamepad_count;
+static SDL_JoystickID g_active_gamepad_id = -1;
+static bool g_haptics_available;
 
 /* Die: fatal-error sink used everywhere in the engine for unrecoverable
  * conditions (missing assets, corrupt files, OS resource failures, etc.).
@@ -676,12 +696,19 @@ int main(int argc, char** argv) {
   if (g_config.audio_samples <= 0 || ((g_config.audio_samples & (g_config.audio_samples - 1)) != 0))
     g_config.audio_samples = kDefaultSamples;
 
+  ConfigureRumbleHints();
+
   // set up SDL
   /* Three SDL subsystems matter to us: video for the window/renderer,
    * audio for the SPC mixer, and game controller for hot-plugged pads. */
   if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
     printf("Failed to init SDL: %s\n", SDL_GetError());
     return 1;
+  }
+  if (g_config.enable_rumble && SDL_InitSubSystem(SDL_INIT_HAPTIC) != 0) {
+    fprintf(stderr, "SDL haptic fallback disabled: %s\n", SDL_GetError());
+  } else {
+    g_haptics_available = g_config.enable_rumble;
   }
 
   /* Window dimensions: use the explicit width/height from the INI when
@@ -783,6 +810,9 @@ int main(int argc, char** argv) {
         /* Hot-plug: open the newly-attached gamepad so it produces events. */
         OpenOneGamepad(event.cdevice.which);
         break;
+      case SDL_CONTROLLERDEVICEREMOVED:
+        CloseGamepadByInstanceId(event.cdevice.which);
+        break;
       case SDL_CONTROLLERAXISMOTION:
         HandleGamepadAxisInput(event.caxis.which, event.caxis.axis, event.caxis.value);
         break;
@@ -791,8 +821,10 @@ int main(int argc, char** argv) {
         /* Translate SDL's controller button enum into our internal
          * kGamepadBtn_* index; -1 means we do not bind that button. */
         int b = RemapSdlButton(event.cbutton.button);
-        if (b >= 0 && !(event.type == SDL_CONTROLLERBUTTONDOWN && Hud_NewSettingsMenu_CaptureGamepadButton(b)))
+        if (b >= 0 && !(event.type == SDL_CONTROLLERBUTTONDOWN && Hud_NewSettingsMenu_CaptureGamepadButton(b))) {
+          MarkActiveGamepad(event.cbutton.which);
           HandleGamepadInput(b, event.type == SDL_CONTROLLERBUTTONDOWN);
+        }
         break;
       }
       case SDL_MOUSEWHEEL:
@@ -920,6 +952,8 @@ int main(int argc, char** argv) {
 
   SDL_DestroyMutex(g_audio_mutex);
   free(g_audiobuffer);
+
+  CloseAllGamepads();
 
   g_renderer_funcs.Destroy();
 
@@ -1190,16 +1224,276 @@ static void HandleInput(int keyCode, int keyMod, bool pressed) {
     HandleCommand(j, pressed);
 }
 
+/* Gamepad registry helpers. SDL haptic rumble is used here because it is
+ * available in the project's existing SDL 2.0.5 Visual Studio dependency;
+ * modern SDL builds use GameController rumble first for Bluetooth pads. */
+static OpenGamepad *FindOpenGamepad(SDL_JoystickID instance_id) {
+  for (int i = 0; i < g_open_gamepad_count; i++) {
+    if (g_open_gamepads[i].instance_id == instance_id)
+      return &g_open_gamepads[i];
+  }
+  return NULL;
+}
+
+static bool GamepadHasAnyRumble(OpenGamepad *pad) {
+#if SDL_VERSION_ATLEAST(2, 0, 9)
+  if (pad->controller_rumble_ready)
+    return true;
+#endif
+  return pad->haptic_rumble_ready;
+}
+
+static OpenGamepad *FindActiveRumbleGamepad(void) {
+  OpenGamepad *pad = FindOpenGamepad(g_active_gamepad_id);
+  if (pad && GamepadHasAnyRumble(pad))
+    return pad;
+  for (int i = 0; i < g_open_gamepad_count; i++) {
+    if (GamepadHasAnyRumble(&g_open_gamepads[i]))
+      return &g_open_gamepads[i];
+  }
+  return NULL;
+}
+
+static void StopGamepadRumble(OpenGamepad *pad) {
+#if SDL_VERSION_ATLEAST(2, 0, 9)
+  if (pad->controller_rumble_ready)
+    SDL_GameControllerRumble(pad->controller, 0, 0, 0);
+#endif
+  if (pad->haptic_rumble_ready)
+    SDL_HapticRumbleStop(pad->haptic);
+}
+
+static void CloseGamepadAtIndex(int index) {
+  OpenGamepad *pad = &g_open_gamepads[index];
+  SDL_JoystickID closed_id = pad->instance_id;
+  StopGamepadRumble(pad);
+  if (pad->haptic)
+    SDL_HapticClose(pad->haptic);
+  if (pad->controller)
+    SDL_GameControllerClose(pad->controller);
+
+  g_open_gamepads[index] = g_open_gamepads[g_open_gamepad_count - 1];
+  memset(&g_open_gamepads[g_open_gamepad_count - 1], 0, sizeof(g_open_gamepads[0]));
+  g_open_gamepad_count--;
+  if (g_active_gamepad_id == closed_id)
+    g_active_gamepad_id = g_open_gamepad_count ? g_open_gamepads[0].instance_id : -1;
+}
+
+static void CloseGamepadByInstanceId(SDL_JoystickID instance_id) {
+  for (int i = 0; i < g_open_gamepad_count; i++) {
+    if (g_open_gamepads[i].instance_id == instance_id) {
+      CloseGamepadAtIndex(i);
+      return;
+    }
+  }
+}
+
+static void CloseAllGamepads(void) {
+  while (g_open_gamepad_count != 0)
+    CloseGamepadAtIndex(g_open_gamepad_count - 1);
+}
+
+static void MarkActiveGamepad(SDL_JoystickID instance_id) {
+  if (FindOpenGamepad(instance_id))
+    g_active_gamepad_id = instance_id;
+}
+
+static void ConfigureRumbleHints(void) {
+  if (!g_config.enable_rumble)
+    return;
+#ifdef SDL_HINT_JOYSTICK_HIDAPI
+  SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
+#endif
+#ifdef SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE
+  SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
+#endif
+}
+
 /* OpenOneGamepad: opens device index `i` as an SDL game controller if
  * SDL recognizes it. Called once per joystick at startup and again from
  * the event loop on SDL_CONTROLLERDEVICEADDED. Failure is logged but
  * not fatal - one bad pad shouldn't prevent the game from running. */
 static void OpenOneGamepad(int i) {
-  if (SDL_IsGameController(i)) {
-    SDL_GameController *controller = SDL_GameControllerOpen(i);
-    if (!controller)
-      fprintf(stderr, "Could not open gamepad %d: %s\n", i, SDL_GetError());
+  if (!SDL_IsGameController(i))
+    return;
+  if (g_open_gamepad_count == kMaxOpenGamepads) {
+    fprintf(stderr, "Could not open gamepad %d: too many gamepads\n", i);
+    return;
   }
+
+  SDL_GameController *controller = SDL_GameControllerOpen(i);
+  if (!controller) {
+    fprintf(stderr, "Could not open gamepad %d: %s\n", i, SDL_GetError());
+    return;
+  }
+
+  SDL_Joystick *joystick = SDL_GameControllerGetJoystick(controller);
+  if (!joystick) {
+    fprintf(stderr, "Could not inspect gamepad %d: %s\n", i, SDL_GetError());
+    SDL_GameControllerClose(controller);
+    return;
+  }
+
+  SDL_JoystickID instance_id = SDL_JoystickInstanceID(joystick);
+  if (FindOpenGamepad(instance_id)) {
+    SDL_GameControllerClose(controller);
+    return;
+  }
+
+  OpenGamepad *pad = &g_open_gamepads[g_open_gamepad_count++];
+  memset(pad, 0, sizeof(*pad));
+  pad->controller = controller;
+  pad->instance_id = instance_id;
+
+#if SDL_VERSION_ATLEAST(2, 0, 9)
+  pad->controller_rumble_ready = g_config.enable_rumble;
+#endif
+
+  if (g_config.enable_rumble && g_haptics_available && SDL_JoystickIsHaptic(joystick)) {
+    pad->haptic = SDL_HapticOpenFromJoystick(joystick);
+    if (pad->haptic && SDL_HapticRumbleSupported(pad->haptic) && SDL_HapticRumbleInit(pad->haptic) == 0) {
+      pad->haptic_rumble_ready = true;
+    } else if (pad->haptic) {
+      SDL_HapticClose(pad->haptic);
+      pad->haptic = NULL;
+    }
+  }
+
+  if (g_active_gamepad_id == -1)
+    g_active_gamepad_id = instance_id;
+}
+
+static void Rumble_Play(Uint16 low, Uint16 high, Uint32 duration_ms, float fallback_strength) {
+  if (!g_config.enable_rumble)
+    return;
+  OpenGamepad *pad = FindActiveRumbleGamepad();
+  if (!pad)
+    return;
+#if SDL_VERSION_ATLEAST(2, 0, 9)
+  if (pad->controller_rumble_ready) {
+    if (SDL_GameControllerRumble(pad->controller, low, high, duration_ms) == 0)
+      return;
+    pad->controller_rumble_ready = false;
+  }
+#endif
+  if (pad->haptic_rumble_ready)
+    SDL_HapticRumblePlay(pad->haptic, fallback_strength, duration_ms);
+}
+
+void Rumble_RequestDamageBuzz(void) {
+  Rumble_Play(0x1400, 0x2800, 80, 0.20f);
+}
+
+void Rumble_RequestDashStepBuzz(void) {
+  Rumble_Play(0x0600, 0x1800, 35, 0.12f);
+}
+
+void Rumble_RequestDashBonkBuzz(void) {
+  Rumble_Play(0xc000, 0x6800, 110, 0.50f);
+}
+
+void Rumble_RequestDashAttackBuzz(void) {
+  Rumble_Play(0x2200, 0x5000, 70, 0.35f);
+}
+
+void Rumble_RequestLandingBuzz(void) {
+  Rumble_Play(0x2600, 0x1800, 90, 0.25f);
+}
+
+void Rumble_RequestBombExplosionBuzz(void) {
+  Rumble_Play(0xb800, 0xa800, 240, 0.90f);
+}
+
+void Rumble_RequestHammerBuzz(void) {
+  Rumble_Play(0x1800, 0x3000, 55, 0.25f);
+}
+
+void Rumble_RequestLampFlameBuzz(void) {
+  Rumble_Play(0x1800, 0x7800, 45, 0.35f);
+}
+
+void Rumble_RequestBushSlashBuzz(void) {
+  Rumble_Play(0x1200, 0x6800, 45, 0.30f);
+}
+
+void Rumble_RequestBushThrownHitBuzz(void) {
+  Rumble_Play(0x3000, 0x9000, 70, 0.45f);
+}
+
+void Rumble_RequestPotBreakBuzz(void) {
+  Rumble_Play(0x4800, 0xa800, 80, 0.50f);
+}
+
+void Rumble_RequestMagicPowderDamageBuzz(void) {
+  Rumble_Play(0x1800, 0x7000, 55, 0.35f);
+}
+
+void Rumble_RequestMagicPowderTransformBuzz(void) {
+  Rumble_Play(0x2800, 0xc800, 90, 0.55f);
+}
+
+void Rumble_RequestSpinChargeBuildBuzz(void) {
+  Rumble_Play(0x2800, 0xb000, 45, 0.55f);
+}
+
+void Rumble_RequestSpinChargeReadyBuzz(void) {
+  Rumble_Play(0x9000, 0xffff, 140, 0.90f);
+}
+
+void Rumble_RequestSpinChargeHoldBuzz(void) {
+  Rumble_Play(0x4000, 0xc000, 70, 0.65f);
+}
+
+void Rumble_RequestSpinAttackStartBuzz(void) {
+  Rumble_Play(0xa000, 0xffff, 100, 0.85f);
+}
+
+void Rumble_RequestSpinAttackSweepBuzz(void) {
+  Rumble_Play(0x6000, 0xd000, 45, 0.65f);
+}
+
+void Rumble_RequestEtherStartBuzz(void) {
+  Rumble_Play(0xc000, 0xffff, 145, 0.95f);
+}
+
+void Rumble_RequestEtherLightningBuzz(void) {
+  Rumble_Play(0x5000, 0xffff, 65, 0.80f);
+}
+
+void Rumble_RequestEtherPulseBuzz(void) {
+  Rumble_Play(0xa800, 0xffff, 105, 0.90f);
+}
+
+void Rumble_RequestEtherExpandBuzz(void) {
+  Rumble_Play(0x7800, 0xffff, 75, 0.85f);
+}
+
+void Rumble_RequestEtherSpinBuzz(void) {
+  Rumble_Play(0x6000, 0xf000, 85, 0.85f);
+}
+
+void Rumble_RequestEtherFadeBuzz(void) {
+  Rumble_Play(0x5800, 0xd000, 70, 0.70f);
+}
+
+void Rumble_RequestBombosStartBuzz(void) {
+  Rumble_Play(0xe000, 0xd000, 210, 0.95f);
+}
+
+void Rumble_RequestBombosColumnBuzz(void) {
+  Rumble_Play(0xc000, 0xe000, 95, 0.90f);
+}
+
+void Rumble_RequestBombosBlastBuzz(void) {
+  Rumble_Play(0xffff, 0xffff, 130, 1.00f);
+}
+
+void Rumble_RequestQuakeStartBuzz(void) {
+  Rumble_Play(0xffff, 0xffff, 420, 1.00f);
+}
+
+void Rumble_RequestQuakePulseBuzz(void) {
+  Rumble_Play(0xffff, 0xffff, 220, 1.00f);
 }
 
 /* RemapSdlButton: translate SDL's SDL_GameControllerButton enum into
@@ -1344,8 +1638,10 @@ static void HandleGamepadAxisInput(int gamepad_id, int axis, int value) {
   if ((axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT)) {
     if (value < 12000 || value >= 16000) {  // hysteresis
       int button = axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT ? kGamepadBtn_L2 : kGamepadBtn_R2;
-      if (!(value >= 12000 && Hud_NewSettingsMenu_CaptureGamepadButton(button)))
+      if (!(value >= 12000 && Hud_NewSettingsMenu_CaptureGamepadButton(button))) {
+        MarkActiveGamepad(gamepad_id);
         HandleGamepadInput(button, value >= 12000);
+      }
     }
     return;
   }
@@ -1361,6 +1657,7 @@ static void HandleGamepadAxisInput(int gamepad_id, int axis, int value) {
       last_gamepad_id = gamepad_id;
       last_x = last_y = 0;
     }
+    MarkActiveGamepad(gamepad_id);
     /* Update the cached x or y component without a redundant branch:
      * pick the field's address with the ternary, then assign through it. */
     *(axis == SDL_CONTROLLER_AXIS_LEFTX ? &last_x : &last_y) = value;

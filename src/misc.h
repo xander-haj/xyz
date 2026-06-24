@@ -107,4 +107,4 @@ uint8 CalculateSfxPan(uint16 x);
 uint8 CalculateSfxPan_Arbitrary(uint8 a);
 void Init_LoadDefaultTileAttr();
 void Main_ShowTextMessage();
-uint8 HandleItemTileAction_Overworld(uint16 x, uint16 y);
+uint8 HandleItemTileAction_Overworld(uint16 x, uint16 y, bool is_sword_slash);
