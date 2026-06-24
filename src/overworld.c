@@ -3249,21 +3249,25 @@ static uint16 Overworld_FindPersistedBombDoorPos() {
 }
 
 /*
- * Overworld_LoadStaticOverlayTiles - Apply editable ZScream-style map16 tile
+ * Overworld_LoadStaticOverlayTiles - Apply generated event-overlay map16 tile
  * writes compiled into the extended overworld metadata asset tail.
+ *
+ * Returns true when the asset pack contains the generated overlay table, even
+ * when the current screen's row list is empty. Older asset packs lack this tail,
+ * so callers can fall back to the original hardcoded event-overlay routine.
  */
-static void Overworld_LoadStaticOverlayTiles() {
+static bool Overworld_LoadStaticOverlayTiles() {
   if (kOverworldMapIsSmall_SIZE <= kOwStaticOverlayDataOffset)
-    return;
+    return false;
 
   uint8 area = BYTE(overworld_screen_index);
   unsigned int offset_slot = kOwStaticOverlayOffsetTable + area * 2;
   if (offset_slot + 1 >= kOverworldMapIsSmall_SIZE)
-    return;
+    return false;
 
   unsigned int offset = kOverworldMapIsSmall[offset_slot] | kOverworldMapIsSmall[offset_slot + 1] << 8;
   if (kOwStaticOverlayDataOffset + offset >= kOverworldMapIsSmall_SIZE)
-    return;
+    return false;
   const uint8 *p = kOverworldMapIsSmall + kOwStaticOverlayDataOffset + offset;
   const uint8 *end = kOverworldMapIsSmall + kOverworldMapIsSmall_SIZE;
   while (p < end && p[0] != 0xff) {
@@ -3275,26 +3279,27 @@ static void Overworld_LoadStaticOverlayTiles() {
       dung_bg2[XY(x, y)] = tile;
     p += 4;
   }
+  return true;
 }
 
 /*
  * Overworld_HandleOverlaysAndBombDoors - Per-screen post-draw fixups:
- *   - Editable ZScream-style static overlay tile writes.
  *   - Screens 0x33 / 0x2f: paint a single map16 tile at a hardcoded
  *     position with id 0x20f (specific scripted tile patches).
- *   - Event-flag bit 0x20: load the full secondary event overlay
- *     (e.g., uncle's body, intro Zelda's-cell tiles).
+ *   - Event-flag bit 0x20: load generated event-overlay map16 writes,
+ *     falling back to the original hardcoded secondary event overlay.
  *   - Event-flag bit 0x02: place a 2-tile bomb-door pair at the
  *     last 0x86-Bombable item in the screen's compiled Items list.
  */
 void Overworld_HandleOverlaysAndBombDoors() {  // 82ef29
-  Overworld_LoadStaticOverlayTiles();
   if (overworld_screen_index == 0x33)
     dung_bg2[340] = 0x20f;
   else if (overworld_screen_index == 0x2f)
     dung_bg2[1497] = 0x20f;
-  if (BYTE(overworld_screen_index) < 0x80 && save_ow_event_info[BYTE(overworld_screen_index)] & 0x20)
-    Overworld_LoadEventOverlay();
+  if (BYTE(overworld_screen_index) < 0x80 && save_ow_event_info[BYTE(overworld_screen_index)] & 0x20) {
+    if (!Overworld_LoadStaticOverlayTiles())
+      Overworld_LoadEventOverlay();
+  }
   if (save_ow_event_info[BYTE(overworld_screen_index)] & 2) {
     uint16 bomb_pos = Overworld_FindPersistedBombDoorPos();
     if (bomb_pos != 0xffff) {
