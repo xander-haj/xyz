@@ -250,6 +250,25 @@ AUDIT_DOMAINS: tuple[DomainAudit, ...] = (
         guardrails=("gravestone tilemap must match x/y/area",),
     ),
     DomainAudit(
+        key="dialogue-text",
+        zscream_refs=("ZeldaFullEditor/NetZS.cs",),
+        source_truth=("assets/dialogue.txt", "src/messaging.c"),
+        dump_owners=("assets/editor_asset_dialogue.py", "assets/editor_asset_npc_dialogue.py"),
+        patch_owners=(
+            "assets/modding/dialogue_patch.py",
+            "dev_tools/overworld_editor/js/dialogue-mod-export.js",
+        ),
+        compile_owners=("assets/compile_resources.py",),
+        runtime_owners=("src/messaging.c",),
+        editor_owners=("dev_tools/overworld_editor/js/dialogue-controls.js",),
+        operation_kinds=("dialogue.text",),
+        guardrails=(
+            "text edits replace dialogue.txt lines only",
+            "literal newlines are rejected because dialogue.txt is one source row per id",
+            "sprite handlers still own which message ids are shown",
+        ),
+    ),
+    DomainAudit(
         key="secondary-overlays-and-subscreen-fx",
         zscream_refs=(
             "ZeldaFullEditor/Data/Overworld/Overworld.cs",

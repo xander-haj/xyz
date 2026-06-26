@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .chr_patch import apply_chr_patch, finalize_chr_packs, prepare_chr_packs
 from .conflict_report import ConflictReport
+from .dialogue_patch import apply_dialogue_patch, finalize_dialogue, prepare_dialogue
 from .grove_patch import apply_grove_patch
 from .gravestone_patch import apply_gravestone_patch, finalize_gravestones, prepare_gravestones
 from .palette_patch import apply_palette_patch, finalize_palettes, prepare_palettes
@@ -88,24 +89,26 @@ def build_mods(values: list[str]) -> dict:
     palettes = prepare_palettes(ASSETS_DIR, generated_dir)
     chr_packs = prepare_chr_packs(ASSETS_DIR, generated_dir)
     gravestones = prepare_gravestones(generated_dir)
+    dialogue = prepare_dialogue(ASSETS_DIR, generated_dir)
     terrain_touched = {}
 
     for entry in entries:
         summaries.extend(apply_mod(entry["dir"], entry["manifest"], generated_dir, map_dir,
-                                   yaml_dir, tile_state, palettes, chr_packs, gravestones, report,
+                                   yaml_dir, tile_state, palettes, chr_packs, gravestones, dialogue, report,
                                    terrain_touched))
     report.raise_if_needed()
     finalize_tile_sources(generated_dir, tile_state)
     finalize_palettes(generated_dir, palettes)
     finalize_chr_packs(generated_dir, chr_packs)
     finalize_gravestones(generated_dir, gravestones)
+    finalize_dialogue(generated_dir, dialogue)
     summary = build_summary(mod_ids, generated_dir, summaries, report)
     write_json(generated_dir / "source_patch_summary.json", summary)
     return summary
 
 
 def apply_mod(mod_dir: Path, manifest: dict, generated_dir: Path, map_dir: Path, yaml_dir: Path,
-              tile_state: dict, palettes: dict, chr_packs: dict, gravestones: dict,
+              tile_state: dict, palettes: dict, chr_packs: dict, gravestones: dict, dialogue: dict,
               report: ConflictReport, terrain_touched: dict) -> list[dict]:
     """Apply every patch listed by one manifest.
 
@@ -120,7 +123,7 @@ def apply_mod(mod_dir: Path, manifest: dict, generated_dir: Path, map_dir: Path,
     summaries = []
     for patch_path, document in sorted(documents, key=lambda item: document_phase(item[1])):
         summaries.extend(apply_document(mod_dir, patch_path, document, generated_dir, map_dir,
-                                        yaml_dir, tile_state, palettes, chr_packs, gravestones, report,
+                                        yaml_dir, tile_state, palettes, chr_packs, gravestones, dialogue, report,
                                         terrain_touched))
     return summaries
 
@@ -143,7 +146,8 @@ def document_phase(document: dict) -> int:
 
 def apply_document(mod_dir: Path, patch_path: str, document: dict, generated_dir: Path, map_dir: Path,
                    yaml_dir: Path, tile_state: dict, palettes: dict, chr_packs: dict,
-                   gravestones: dict, report: ConflictReport, terrain_touched: dict) -> list[dict]:
+                   gravestones: dict, dialogue: dict, report: ConflictReport,
+                   terrain_touched: dict) -> list[dict]:
     """Dispatch one patch document to the matching layer handler.
 
     Parameters are the patch source and mutable generated build state.
@@ -166,6 +170,8 @@ def apply_document(mod_dir: Path, patch_path: str, document: dict, generated_dir
         applied = apply_metadata_patch(yaml_dir, document)
     elif "gravestones" in format_value:
         applied = apply_gravestone_patch(gravestones, document)
+    elif "dialogue" in format_value:
+        applied = apply_dialogue_patch(dialogue, document, report)
     elif "grove-border" in format_value:
         applied = apply_grove_patch(generated_dir, document)
     return [{"mod": mod_dir.name, "patch": patch_path, **item} for item in applied]
@@ -190,6 +196,7 @@ def build_summary(mod_ids: list[str], generated_dir: Path, applied: list[dict], 
             "overworld_maps": str(generated_dir / "overworld_maps"),
             "overworld": str(generated_dir / "overworld"),
             "map32_to_map16": str(generated_dir / "map32_to_map16.txt"),
+            "dialogue": str(generated_dir / "dialogue.txt"),
             "gravestones": str(generated_dir / "tables" / "overworld_gravestones.json"),
         },
         "baseHashes": base_hashes(),

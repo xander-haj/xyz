@@ -302,6 +302,14 @@ def print_images(args):
       all.append(bytes(ROM.get_bytes(tables.kCompBgPtrs[i], comp_len)))
   add_asset_packed('kBgGfx', all)
 
+def dialogue_source_file(args, lang):
+  from text_compression import dialogue_filename
+  if lang == 'us':
+    generated = generated_file(args, 'dialogue.txt')
+    if generated:
+      return generated
+  return dialogue_filename(lang)
+
 def print_dialogue(args):
   from text_compression import dialogue_filename, kLanguages
 
@@ -319,7 +327,7 @@ def print_dialogue(args):
   all_langs, all_fonts, mappings = [], [], []
   for i, lang in enumerate(languages):
     dict_packed = pack_arrays(text_compression.encode_dictionary(lang))
-    dialogue_packed = pack_arrays(compress_dialogue(dialogue_filename(lang), lang))
+    dialogue_packed = pack_arrays(compress_dialogue(dialogue_source_file(args, lang), lang))
     all_langs.append(pack_arrays([dict_packed, dialogue_packed]))
     font_data, font_width = sprite_sheets.encode_font_from_png(lang)
     all_fonts.append(pack_arrays([font_data, font_width]))
@@ -2124,11 +2132,23 @@ extern MemBlk FindInAssetArray(int asset, int idx);
 
 # Entry point — run full asset compilation then write the output file.
 # Parameters:
-#   args: object with sprites_from_png, languages, and print_assets_header attributes
+#   args: object with sprites_from_png, languages, print_assets_header, nodat,
+#         and editor_assets attributes
 # Returns: nothing
 def main(args):
   print_all(args)
-  write_assets_to_file(args.print_assets_header)
+  # --nodat and --editor-assets keep normal compilation but swap the final
+  # monolithic runtime blob for a directory dump.
+  if getattr(args, 'nodat', False) or getattr(args, 'editor_assets', False):
+    import dat_dump
+    output_dir = dat_dump.EDITOR_DUMP_DIR_NAME if getattr(args, 'editor_assets', False) else dat_dump.DUMP_DIR_NAME
+    dump_manifest = dat_dump.write_assets_to_directory(assets, output_dir=output_dir)
+    # --editor-assets adds grouped helper JSON after the faithful dat dump exists.
+    if getattr(args, 'editor_assets', False):
+      import editor_assets
+      editor_assets.write_editor_assets(assets, dump_manifest, args=args, output_dir=output_dir)
+  else:
+    write_assets_to_file(args.print_assets_header)
 
 # When run directly as a script, load the ROM from argv and use default compilation settings.
 # When imported as a module (by restool.py), use the already-loaded ROM from util.
@@ -2139,6 +2159,8 @@ if __name__ == "__main__":
     sprites_from_png = False
     languages = None
     print_assets_header = False
+    nodat = False
+    editor_assets = False
     overworld_source_root = None
     overworld_generated_root = None
   main(DefaultArgs())

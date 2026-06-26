@@ -48,5 +48,5 @@ sound_intro.txt
 /hud_icons.png
 # Decoded font sprite sheets (one per language variant)
 /font*.png
-
+/dat-dump/
 

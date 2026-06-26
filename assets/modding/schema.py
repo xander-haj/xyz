@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .paths import safe_join, validate_mod_id
+from .resolver import parse_int
 from .zscream_parity import assert_zscream_parity_contract, known_zscream_patch_kinds
 
 MOD_FORMAT = "zelda3-overworld-mod-v1"
@@ -20,6 +21,7 @@ PATCH_FORMATS = {
     "palettes": "zelda3-overworld-palettes-v1",
     "metadata": "zelda3-overworld-metadata-v1",
     "gravestones": "zelda3-overworld-gravestones-v1",
+    "dialogue": "zelda3-overworld-dialogue-v1",
     "grove-border": "zelda3-overworld-grove-border-v1",
 }
 KNOWN_PATCH_KINDS = known_zscream_patch_kinds()
@@ -43,6 +45,7 @@ PATCH_FORMAT_KINDS = {
         "metadata.sprite",
     },
     PATCH_FORMATS["gravestones"]: {"gravestone.record"},
+    PATCH_FORMATS["dialogue"]: {"dialogue.text"},
     PATCH_FORMATS["grove-border"]: set(),
 }
 PATCH_FORMAT_COLLECTIONS = {
@@ -55,6 +58,7 @@ PATCH_FORMAT_COLLECTIONS = {
     PATCH_FORMATS["palettes"]: "patches",
     PATCH_FORMATS["metadata"]: "patches",
     PATCH_FORMATS["gravestones"]: "patches",
+    PATCH_FORMATS["dialogue"]: "patches",
     PATCH_FORMATS["grove-border"]: "patches",
 }
 METADATA_KIND_PATHS = {
@@ -71,6 +75,7 @@ METADATA_SPRITE_PATHS = {
     "Sprites.FirstPart",
     "Sprites.SecondPart",
 }
+DIALOGUE_MESSAGE_COUNT = 398
 
 
 def load_json(path: Path) -> Any:
@@ -165,6 +170,40 @@ def validate_operation_shape(format_value: str, operation: dict, label: str) -> 
     """Validate operation fields whose meaning depends on the patch format."""
     if format_value == PATCH_FORMATS["metadata"]:
         validate_metadata_operation_path(operation, label)
+    if format_value == PATCH_FORMATS["dialogue"]:
+        validate_dialogue_operation(operation, label)
+
+
+def validate_dialogue_operation(operation: dict, label: str = "dialogue patch") -> None:
+    """Validate one dialogue text edit against dialogue.txt line constraints."""
+    if operation.get("kind") != "dialogue.text":
+        raise ValueError("%s operation kind must be dialogue.text." % label)
+    dialogue_id = parse_dialogue_id(operation.get("id"), "%s dialogue id" % label)
+    if dialogue_id < 0 or dialogue_id >= DIALOGUE_MESSAGE_COUNT:
+        raise ValueError("%s dialogue id must be in 0..%d." % (label, DIALOGUE_MESSAGE_COUNT - 1))
+    require_dialogue_text(operation.get("text"), "%s text" % label)
+    if "expect" in operation:
+        require_dialogue_text(operation.get("expect"), "%s expect" % label)
+    if "override" in operation and not isinstance(operation.get("override"), bool):
+        raise ValueError("%s override must be boolean." % label)
+
+
+def parse_dialogue_id(value, label: str) -> int:
+    """Parse a strict dialogue id while rejecting JSON booleans."""
+    if isinstance(value, bool):
+        raise ValueError("%s must be an integer." % label)
+    try:
+        return parse_int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("%s must be an integer." % label) from error
+
+
+def require_dialogue_text(value, label: str) -> None:
+    """Require dialogue text to remain one dialogue.txt source line."""
+    if not isinstance(value, str):
+        raise ValueError("%s must be a string." % label)
+    if "\n" in value or "\r" in value:
+        raise ValueError("%s cannot contain literal newlines." % label)
 
 
 def validate_metadata_operation_path(operation: dict, label: str = "metadata patch") -> None:

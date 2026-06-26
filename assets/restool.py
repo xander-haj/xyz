@@ -41,7 +41,11 @@ optional = parser.add_argument_group('Language settings')
 optional.add_argument('--extract-dialogue', action='store_true', help = 'Extract dialogue from a translated ROM')
 # --languages: comma-separated language codes (e.g., "de,fr") to bundle into zelda3_assets.dat.
 # Each code maps to a dialogue file in the languages/ subdirectory.
-optional.add_argument('--languages', action='store', metavar='L1,L2', help = 'Comma separated list of additional languages to build (de,fr,fr-c,en,es,pl,pt,redux,nl,sv).')
+optional.add_argument(
+  '--languages',
+  action='store',
+  metavar='L1,L2',
+  help='Comma separated list of additional languages to build (de,fr,fr-c,en,es,pl,pt,redux,nl,sv).')
 
 # --- Debug options group ---
 # Flags for developer debugging and inspection, not part of normal build workflows.
@@ -49,13 +53,27 @@ optional = parser.add_argument_group('Debug things')
 # --no-build: skip the final compilation step. Useful when you only want to extract
 # resources without producing zelda3_assets.dat.
 optional.add_argument('--no-build', action='store_true', help="Don't actually build zelda3_assets.dat")
+# --nodat: run the normal compiler, but dump every compiled asset into assets/dat dump/
+# instead of writing the monolithic zelda3_assets.dat runtime blob.
+optional.add_argument(
+  '--nodat',
+  action='store_true',
+  help='Dump compiled assets into "dat dump" instead of building zelda3_assets.dat')
+# --editor-assets: emit the dat-dump plus JSON helper indexes for editor tooling.
+optional.add_argument(
+  '--editor-assets',
+  action='store_true',
+  help='Build "dat-dump" plus editor-facing helper indexes')
 # --print-strings: dump all compressed dialogue strings from the ROM to stdout for inspection.
 optional.add_argument('--print-strings', action='store_true', help="Print all dialogue strings")
 # --print-assets-header: emit a C header file mapping asset names to array indices,
 # used by the C codebase to reference packed assets by symbolic name.
 optional.add_argument('--print-assets-header', action='store_true')
 # --dump-overworld: write explicit overworld visual intermediates for the dev viewer.
-optional.add_argument('--dump-overworld', action='store_true', help='Dump overworld visual source files for the dev viewer')
+optional.add_argument(
+  '--dump-overworld',
+  action='store_true',
+  help='Dump overworld visual source files for the dev viewer')
 # --mod: build and dump the generated local state for one overworld mod.
 optional.add_argument('--mod', action='store', metavar='MOD', help='Overworld mod id/path for --dump-overworld')
 # --apply-overworld-mods: build generated local assets and compile with them.
@@ -68,10 +86,23 @@ optional = parser.add_argument_group('Image handling')
 # --sprites-from-png: instead of reading sprite data from the ROM binary, load sprites
 # from edited PNG files in the sprites/ directory. This lets artists modify sprites
 # visually and have those changes reflected in the compiled asset file.
-optional.add_argument('--sprites-from-png', action='store_true', help="When compiling, load sprites from png instead of from ROM")
+optional.add_argument(
+  '--sprites-from-png',
+  action='store_true',
+  help='When compiling, load sprites from png instead of from ROM')
 
 # Parse the command line. After this point, args contains all flag values.
 args = parser.parse_args()
+
+# Dat/editor dump modes are final compiler output modes, so reject workflows that
+# deliberately bypass compilation or expect a different final emitter.
+asset_dump_incompatible_mode = (
+  args.extract_dialogue or args.no_build or args.print_strings or
+  args.print_assets_header or args.dump_overworld)
+if (args.nodat or args.editor_assets) and asset_dump_incompatible_mode:
+  parser.error(
+    '--nodat and --editor-assets require compilation and cannot be combined with --extract-dialogue, '
+    '--no-build, --print-strings, --print-assets-header, or --dump-overworld')
 
 # --- Dispatch logic ---
 # The blocks below determine which workflow to run based on the parsed CLI flags.
